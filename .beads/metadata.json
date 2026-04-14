@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "n8n_self_healing",
+  "project_id": "c9e53a36-ea8c-4ad8-b047-073492bf782c"
+}
