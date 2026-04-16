@@ -4,7 +4,35 @@
 ![Code-First](https://img.shields.io/badge/code--first-n8nac-blue.svg)
 ![Status](https://img.shields.io/badge/status-live--verified-brightgreen.svg)
 
-**A code-first n8n workflow set that detects failures, diagnoses them, attempts recovery, and monitors the healing loop.** The project includes a caller workflow, a self-healer, a simulator for known failure classes, and a monitoring workflow that watches recent healing outcomes.
+**A code-first n8n workflow set that detects failures, diagnoses them, attempts recovery, and gets cheaper over time.** The project includes a caller workflow, a self-healer, a simulator for known failure classes, and a monitoring workflow that watches recent healing outcomes.
+
+## Why This Is Different
+
+Traditional n8n recovery flows can call an LLM every time an error appears. This system does not.
+
+The self-healer has a **learning loop**:
+
+- first-time errors can use OpenRouter for diagnosis
+- deterministic rules provide a safe baseline when no key is present
+- once the same `error_type` has healed successfully `3` times, the `4th` matching error skips the LLM and routes from stored history
+
+That means repeated failures become **zero-token diagnoses** instead of recurring inference spend.
+
+## Benchmark Snapshot
+
+Latest benchmark report: [benchmark.md](benchmark.md)
+
+Measured on the live workflows on 2026-04-16:
+
+| Claim | Measured result |
+|---|---|
+| Learning-loop threshold | `4th` identical healed error is the first `historical` run |
+| OpenRouter average before learning | `359` tokens and `$0.000943` per diagnosis |
+| Learned retry case | `379 ms`, `0` tokens, `0` LLM calls |
+| Scenario sweep mix | `4/6` live simulator scenarios already route through `historical` |
+| Projection at 70% repeat rate | `70` fewer LLM calls, `25,130` fewer tokens, `$0.0660` lower cost per `100` errors |
+
+This is the core value proposition: **the workflow does not just auto-heal, it compounds what it learns and reduces future diagnosis cost.**
 
 This is a live, payload-driven recovery system for an n8n instance where `$env` is blocked inside expressions. Runtime secrets and overrides are forwarded explicitly in webhook payloads instead of being read from workflow expressions.
 
@@ -21,6 +49,26 @@ The system follows a 5-step recovery loop:
 5. **Observe** — It writes heal logs, emits Slack-style alerts, and `Self-Healing Monitor` aggregates recent outcomes every 15 minutes or on demand.
 
 A single failing caller execution can produce a healed response with the chosen strategy, diagnosis source, and inspected execution context.
+
+## Learning Loop
+
+The learning loop is implemented in `Self-Healer` through workflow static data:
+
+1. Every execution writes a heal log entry with `error_type`, `diagnosis_source`, `fix_strategy`, `outcome`, and success-rate rollups.
+2. The diagnosis node checks recent history for the same `error_type`.
+3. If one strategy has at least `3` healed matches, that strategy becomes the dominant repair pattern.
+4. The next matching execution returns `diagnosis_source: historical`, skips OpenRouter entirely, and reuses the learned strategy.
+
+Observed benchmark sequence:
+
+| Run | Execution | Source | Tokens | Strategy | Outcome |
+|---|---:|---|---:|---|---|
+| 1 | `1977` | `openrouter` | 324 | `retry` | healed |
+| 2 | `1978` | `openrouter` | 357 | `retry` | healed |
+| 3 | `1979` | `openrouter` | 396 | `retry` | healed |
+| 4 | `1980` | `historical` | 0 | `retry` | healed |
+
+That is the behavior to sell: the system stops paying for diagnosis once it has enough evidence.
 
 ## Live Workflows
 
@@ -53,6 +101,8 @@ This n8n instance blocks `$env` access inside node expressions. Because of that,
 | **OpenRouter** | API key supplied and no historical short-circuit | Calls OpenRouter through an `HTTP Request` node, then parses or falls back safely |
 | **Execution Inspection** | `execution_id` + `n8n_api_key` supplied | Pulls `includeData=true` execution payload and summarizes the failing node context |
 | **Monitoring** | Schedule or monitor webhook | Aggregates recent self-healer runs and routes warning/high alerts |
+
+If you want the full OpenRouter path and token accounting in production or during demos, you need a valid funded `OPENROUTER_API_KEY`. If no key is supplied, or a pattern is already learned, the system still works through `deterministic` or `historical` routing.
 
 ## Supported Error Types
 
