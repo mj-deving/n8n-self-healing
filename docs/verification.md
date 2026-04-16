@@ -57,6 +57,32 @@ Notes:
 - `SLACK_WEBHOOK_URL` was not present in the current shell during the six-scenario rerun, so the fresh simulator pass confirms routing and outcomes but not live Slack delivery for that specific rerun.
 - Live Slack delivery was already confirmed separately by execution `1871`.
 
+## Post-Merge Sanity Check From `main`
+
+Re-run completed from the merged `main` branch on April 16, 2026:
+
+- `npx --yes n8nac verify jBbMvA2RK39YlEM9` passed
+- `npx --yes n8nac verify 85XCB5Us5UVyu3Da` passed
+- `npx --yes n8nac verify rWAEEC4nCqojdRtu` passed
+- `POST /webhook/api-data-sync` with `{"max_items":2}` returned `status=success`, `records_synced=2`, and `storage_backend=workflow_static_data`
+- `npm run demo:errors` rechecked all six scenarios from `main`
+
+Scenario results from the post-merge rerun:
+
+| Scenario | Result | Strategy | Outcome |
+|---|---|---|---|
+| `429` | healed | `backoff` | healed |
+| `500` | healed | `retry` | healed |
+| `401` | escalated | `escalate` | escalated |
+| `parse` | healed | `fallback` | healed |
+| `timeout` | healed | `backoff` | healed |
+| `schema` | healed | `fallback` | healed |
+
+Environment note for this rerun:
+
+- `OPENROUTER_API_KEY` was present, so model-backed diagnosis was available.
+- `SLACK_WEBHOOK_URL` was absent, so this rerun does not add a new live Slack-delivery confirmation.
+
 ## Repository Alignment
 
 The committed workflow source files carry the live workflow IDs and active state, and the public caller workflows propagate payload-supplied runtime configuration into the self-healer request path.
