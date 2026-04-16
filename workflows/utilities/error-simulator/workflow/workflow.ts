@@ -208,7 +208,12 @@ const defaults = {
 };
 
 const envelope = $json || {};
-const selected = defaults[scenario];
+const selected = defaults[scenario] || {
+  node_name: 'Unknown Scenario',
+  error_message: 'Unknown simulator error type requested.',
+  retry_target_url: '',
+  retry_method: 'GET'
+};
 
 return {
   json: {
