@@ -1,0 +1,30 @@
+[
+  {
+    "description": "429 rate limit should back off or retry",
+    "input": {
+      "error_type": "429",
+      "error_message": "Rate limit exceeded",
+      "node_name": "Fetch Source Posts",
+      "workflow_name": "API Data Sync",
+      "input_data": {},
+      "retry_target_url": "https://jsonplaceholder.typicode.com/posts/1",
+      "retry_method": "GET"
+    },
+    "expected": {
+      "healed": true
+    }
+  },
+  {
+    "description": "401 auth failure should escalate",
+    "input": {
+      "error_type": "401",
+      "error_message": "Authentication failed",
+      "node_name": "Fetch Source Posts",
+      "workflow_name": "API Data Sync",
+      "input_data": {}
+    },
+    "expected": {
+      "outcome": "escalated"
+    }
+  }
+]

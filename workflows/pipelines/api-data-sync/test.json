@@ -1,0 +1,22 @@
+[
+  {
+    "description": "Happy path with three records",
+    "input": {
+      "max_items": 3
+    },
+    "expected": {
+      "status": "success",
+      "records_synced": 3
+    }
+  },
+  {
+    "description": "Forced write failure to exercise the healer",
+    "input": {
+      "max_items": 3,
+      "force_write_error": true
+    },
+    "expected": {
+      "status": "healed"
+    }
+  }
+]

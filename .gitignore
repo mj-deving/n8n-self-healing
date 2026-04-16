@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+
+# Build artifacts
+dist/
+*.tgz
+
+# AI session artifacts
+.ai/
+.sessions/
+.codex
+.codex/
+.mcp.json
+
+# PRD work directories (transient)
+MEMORY/
+
+# Plans (transient)
+Plans/
+
+# n8nac runtime config (instance-specific)
+n8nac-config.json
+*:*_*/personal/.n8n-state.json
+*:*_*/personal/*.workflow.ts
+*:*_*/personal/n8n-workflows.d.ts
+*:*_*/personal/tsconfig.json
+
+# Environment
+.env
+.env.local
+.env.production
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
