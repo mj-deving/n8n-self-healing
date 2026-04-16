@@ -157,6 +157,10 @@ return [{
     storageKey: request.storageKey,
     requestedAt: request.requestedAt,
     forceWriteError: request.forceWriteError,
+    openrouter_api_key: request.openrouter_api_key || '',
+    openrouter_model: request.openrouter_model || '',
+    slack_webhook_url: request.slack_webhook_url || '',
+    self_healer_webhook_url: request.self_healer_webhook_url || '',
     transformed,
     recordCount: transformed.length
   }

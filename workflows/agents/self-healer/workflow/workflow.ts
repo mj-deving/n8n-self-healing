@@ -546,7 +546,12 @@ return {
     strategy: $json.fix_strategy,
     outcome: $json.outcome,
     workflow: $json.workflow_name,
+    workflow_name: $json.workflow_name,
+    node_name: $json.node_name,
+    error_type: $json.error_type,
+    error_message: $json.error_message,
     retry_count: Number($json.retry_count || 0),
+    slack_webhook_url: $json.slack_webhook_url || '',
     log_entry: entry,
     storage_backend: 'workflow_static_data'
   }
