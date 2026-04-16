@@ -58,9 +58,9 @@ Expected result:
 ### 3. Push with verification when workflow code changed
 
 ```bash
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/agents/self-healer/workflow/workflow.ts --verify
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/utilities/error-simulator/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/agents/self-healer/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/utilities/error-simulator/workflow/workflow.ts --verify
 ```
 
 If code did not change and you only want a live sanity check, plain `verify` is enough:
@@ -153,7 +153,7 @@ Action:
 Check the embedded Dolt branch tracking in `.beads/embeddeddolt/n8n_self_healing`:
 
 ```bash
-cd /home/mj/projects/n8n-self-healing/.beads/embeddeddolt/n8n_self_healing
+cd .beads/embeddeddolt/n8n_self_healing
 dolt branch -vv
 ```
 
