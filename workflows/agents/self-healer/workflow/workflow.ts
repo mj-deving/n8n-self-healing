@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Self-Healer
-// Nodes   : 17  |  Connections: 23
+// Nodes   : 22  |  Connections: 28
 // </workflow-map>
 
 @workflow({
@@ -58,6 +58,8 @@ export class SelfHealerWorkflow {
                 { name: 'openrouter_api_key', type: 'string' },
                 { name: 'openrouter_model', type: 'string' },
                 { name: 'slack_webhook_url', type: 'string' },
+                { name: 'execution_id', type: 'string' },
+                { name: 'n8n_api_key', type: 'string' },
             ],
         },
     };
@@ -95,7 +97,9 @@ return {
     timestamp: payload.timestamp || new Date().toISOString(),
     openrouter_api_key: payload.openrouter_api_key || '',
     openrouter_model: payload.openrouter_model || '',
-    slack_webhook_url: payload.slack_webhook_url || ''
+    slack_webhook_url: payload.slack_webhook_url || '',
+    execution_id: payload.execution_id || '',
+    n8n_api_key: payload.n8n_api_key || ''
   }
 };`,
     };
@@ -110,14 +114,18 @@ return {
     DiagnoseError = {
         mode: 'runOnceForEachItem',
         language: 'javaScript',
-        jsCode: `const ctx = $json;
+        jsCode: `const ctx = $('Normalize Error Input').first().json;
 const staticData = $getWorkflowStaticData('global');
 const healLog = Array.isArray(staticData.healLog) ? staticData.healLog : [];
-const relevantHistory = healLog
-  .filter((entry) => entry && entry.error_type === ctx.error_type);
+const healHistory = healLog.filter((entry) => entry && entry.error_type === ctx.error_type);
+const upstreamContext = $('Build Upstream Context').first().json;
+const executionContextData = $('Build Execution Context').first().json;
+const relevantHistory = healHistory;
 const historicalMatches = relevantHistory
   .filter((entry) => entry.outcome === 'healed')
   .slice(-5);
+const upstreamReachable = upstreamContext?.upstream_reachable ?? 'unknown';
+const executionSummary = executionContextData?.execution_context || null;
 
 const strategyCounts = historicalMatches.reduce((acc, entry) => {
   const strategy = entry.fix_strategy || entry.strategy || entry.repaired_with || '';
@@ -144,7 +152,9 @@ if (dominantStrategy && dominantStrategy[1] >= 3) {
       diagnosis: historicalEntry?.ai_diagnosis || ('Previously healed ' + dominantStrategy[1] + ' times with ' + dominantStrategy[0] + '.'),
       fix_strategy: dominantStrategy[0],
       wait_seconds: Number(historicalEntry?.total_heal_time_ms || 0) / 1000,
-      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ' via ' + dominantStrategy[0] + ': ' + formattedSuccessRate
+      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ' via ' + dominantStrategy[0] + ': ' + formattedSuccessRate,
+      upstream_reachable: upstreamReachable,
+      execution_context: executionSummary
     }
   };
 }
@@ -179,7 +189,14 @@ if (ctx.openrouter_api_key) {
               node_name: ctx.node_name,
               workflow_name: ctx.workflow_name,
               input_data: ctx.input_data,
-              timestamp: ctx.timestamp
+              timestamp: ctx.timestamp,
+              upstream_reachable: upstreamReachable,
+              recent_heal_history: relevantHistory.slice(-5).map((entry) => ({
+                outcome: entry.outcome,
+                fix_strategy: entry.fix_strategy || entry.strategy || entry.repaired_with || '',
+                diagnosis_source: entry.diagnosis_source || '',
+              })),
+              execution_context: executionSummary
             }, null, 2)
           }
         ]
@@ -265,6 +282,13 @@ if (!diagnosis) {
     details: 'Escalate for manual review.'
   };
 
+  if (ctx.error_type === '500' && upstreamReachable === true) {
+    result.diagnosis = 'The upstream service returned an internal error but the dependency is still reachable.';
+    result.fix_strategy = 'retry';
+    result.wait_seconds = 0;
+    result.details = 'HEAD health check succeeded, so this looks transient. Retry immediately.';
+  }
+
   diagnosis = {
     ...result,
     diagnosis_source: 'deterministic'
@@ -278,9 +302,135 @@ return {
     diagnosis: diagnosis.diagnosis,
     fix_strategy: diagnosis.fix_strategy,
     wait_seconds: Number(diagnosis.wait_seconds || 0),
-    details: diagnosis.details || diagnosis.diagnosis
+    details: diagnosis.details || diagnosis.diagnosis,
+    upstream_reachable: upstreamReachable,
+    execution_context: executionSummary
   }
 };`,
+    };
+
+    @node({
+        id: 'b1000002-0001-4000-8000-000000000022',
+        name: 'Check Upstream Health',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.4,
+        position: [520, 140],
+        onError: 'continueRegularOutput',
+    })
+    CheckUpstreamHealth = {
+        method: 'HEAD',
+        url: '={{ $json.retry_target_url || "https://example.invalid/skip-upstream-check" }}',
+        authentication: 'none',
+        responseType: 'text',
+        options: {
+            timeout: 5000,
+        },
+    };
+
+    @node({
+        id: 'b1000002-0001-4000-8000-000000000023',
+        name: 'Build Upstream Context',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [780, 140],
+    })
+    BuildUpstreamContext = {
+        mode: 'runOnceForEachItem',
+        language: 'javaScript',
+        jsCode: `const original = $('Normalize Error Input').first().json;
+const hasTarget = Boolean(original.retry_target_url);
+const errorMessage = $json.error?.message || $json.message || '';
+
+return {
+  json: {
+    upstream_reachable: !hasTarget ? 'unknown' : !errorMessage
+  }
+};`,
+    };
+
+    @node({
+        id: 'b1000002-0001-4000-8000-000000000024',
+        name: 'Fetch Execution Context',
+        type: 'n8n-nodes-base.httpRequest',
+        version: 4.4,
+        position: [520, 380],
+        onError: 'continueRegularOutput',
+    })
+    FetchExecutionContext = {
+        method: 'GET',
+        url: '={{ $json.execution_id ? "http://172.31.224.1:5678/api/v1/executions/" + $json.execution_id : "https://example.invalid/skip-execution-context" }}',
+        authentication: 'none',
+        sendHeaders: true,
+        specifyHeaders: 'keypair',
+        headerParameters: {
+            parameters: [
+                { name: 'X-N8N-API-KEY', value: '={{ $json.n8n_api_key || "" }}' },
+            ],
+        },
+        responseType: 'json',
+        options: {},
+    };
+
+    @node({
+        id: 'b1000002-0001-4000-8000-000000000025',
+        name: 'Build Execution Context',
+        type: 'n8n-nodes-base.code',
+        version: 2,
+        position: [780, 380],
+    })
+    BuildExecutionContext = {
+        mode: 'runOnceForEachItem',
+        language: 'javaScript',
+        jsCode: `const original = $('Normalize Error Input').first().json;
+
+if (!original.execution_id || !original.n8n_api_key) {
+  return {
+    json: {
+      execution_context: null
+    }
+  };
+}
+
+const errorMessage = $json.error?.message || $json.message || '';
+if (errorMessage) {
+  return {
+    json: {
+      execution_context: null
+    }
+  };
+}
+
+const payload = $json.data || $json;
+const executionError = payload.resultData?.error || payload.data?.resultData?.error || {};
+
+return {
+  json: {
+    execution_context: {
+      id: payload.id || original.execution_id,
+      status: payload.status || '',
+      mode: payload.mode || '',
+      failed_node: executionError.node || '',
+      error_message: executionError.message || ''
+    }
+  }
+};`,
+    };
+
+    @node({
+        id: 'b1000002-0001-4000-8000-000000000026',
+        name: 'Wait For Parallel Context',
+        type: 'n8n-nodes-base.merge',
+        version: 3.2,
+        position: [1040, 260],
+    })
+    WaitForParallelContext = {
+        mode: 'chooseBranch',
+        numberInputs: 2,
+        chooseBranchMode: 'waitForAll',
+        output: 'specifiedInput',
+        useDataOfInput: '1',
+        options: {},
+        query: 'SELECT * FROM input1',
     };
 
     @node({
@@ -503,6 +653,7 @@ const entry = {
   retry_count: Number($json.retry_count || 0),
   total_heal_time_ms: Number($json.wait_seconds || 0) * 1000,
   details: $json.details || '',
+  upstream_reachable: $json.upstream_reachable ?? 'unknown',
 };
 
 const existing = Array.isArray(staticData.healLog) ? staticData.healLog : [];
@@ -577,6 +728,7 @@ return {
     error_message: $json.error_message,
     retry_count: Number($json.retry_count || 0),
     diagnosis_source: $json.diagnosis_source,
+    upstream_reachable: $json.upstream_reachable ?? 'unknown',
     slack_webhook_url: $json.slack_webhook_url || '',
     success_rate: entry.success_rate,
     log_entry: entry,
@@ -647,7 +799,16 @@ return {
         this.ExecuteWorkflowTrigger.out(0).to(this.NormalizeErrorInput.in(0));
         this.HealerWebhook.out(0).to(this.NormalizeErrorInput.in(0));
 
-        this.NormalizeErrorInput.out(0).to(this.DiagnoseError.in(0));
+        this.NormalizeErrorInput.out(0).to(this.CheckUpstreamHealth.in(0));
+        this.NormalizeErrorInput.out(0).to(this.FetchExecutionContext.in(0));
+
+        this.CheckUpstreamHealth.out(0).to(this.BuildUpstreamContext.in(0));
+        this.FetchExecutionContext.out(0).to(this.BuildExecutionContext.in(0));
+
+        this.BuildUpstreamContext.out(0).to(this.WaitForParallelContext.in(0));
+        this.BuildExecutionContext.out(0).to(this.WaitForParallelContext.in(1));
+
+        this.WaitForParallelContext.out(0).to(this.DiagnoseError.in(0));
         this.DiagnoseError.out(0).to(this.RouteFixStrategy.in(0));
 
         this.RouteFixStrategy.out(0).to(this.RetryOriginalRequest.in(0));
