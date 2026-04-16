@@ -27,7 +27,12 @@ test('self-healer collapses diagnosis into one code node with historical and Ope
   assert.match(source, /name: 'Check Upstream Health'/);
   assert.match(source, /name: 'Build Upstream Context'/);
   assert.match(source, /name: 'Fetch Execution Context'/);
+  assert.match(source, /includeData=true/);
   assert.match(source, /name: 'Build Execution Context'/);
+  assert.match(source, /const runData = resultData\.runData \|\| \{\}/);
+  assert.match(source, /failed_node_input:/);
+  assert.match(source, /source_node:/);
+  assert.match(source, /Execution inspection confirmed/);
   assert.match(source, /name: 'Wait For Parallel Context'/);
   assert.match(source, /this\.NormalizeErrorInput\.out\(0\)\.to\(this\.CheckUpstreamHealth\.in\(0\)\);/);
   assert.match(source, /this\.NormalizeErrorInput\.out\(0\)\.to\(this\.FetchExecutionContext\.in\(0\)\);/);
@@ -51,23 +56,31 @@ test('self-healer preserves slack webhook context into healed alerts', () => {
   assert.match(source, /entry\.success_rate = \{/);
   assert.match(source, /staticData\.healStatsByErrorType = \{/);
   assert.match(source, /upstream_reachable: \$json\.upstream_reachable \?\? 'unknown'/);
+  assert.match(source, /execution_context: \$json\.execution_context \|\| null/);
   assert.match(source, /success_rate: entry\.success_rate/);
   assert.match(source, /slack_webhook_url:\s*\$json\.slack_webhook_url \|\| ''/);
   assert.match(source, /url: '=\{\{ \$json\.slack_webhook_url \|\| "https:\/\/example\.invalid\/slack-webhook-missing" \}\}'/);
 });
 
-test('api-data-sync preserves runtime healer context through transform and write-error paths', () => {
+test('api-data-sync preserves runtime healer and execution context through error handoff paths', () => {
   const source = read('workflows/pipelines/api-data-sync/workflow/workflow.ts');
 
+  assert.match(source, /const n8nApiKey = String\(body\.n8n_api_key \|\| ''\);/);
+  assert.match(source, /const executionId = typeof \$execution\?\.id === 'undefined' \? '' : String\(\$execution\.id\);/);
   assert.match(source, /openrouter_api_key:\s*openrouterApiKey/);
   assert.match(source, /openrouter_model:\s*openrouterModel/);
   assert.match(source, /slack_webhook_url:\s*slackWebhookUrl/);
   assert.match(source, /self_healer_webhook_url:\s*selfHealerWebhookUrl/);
+  assert.match(source, /execution_id:\s*executionId/);
+  assert.match(source, /n8n_api_key:\s*n8nApiKey/);
 
   assert.match(source, /openrouter_api_key:\s*transformed\.openrouter_api_key \|\| ''/);
   assert.match(source, /openrouter_model:\s*transformed\.openrouter_model \|\| ''/);
   assert.match(source, /slack_webhook_url:\s*transformed\.slack_webhook_url \|\| ''/);
   assert.match(source, /self_healer_webhook_url:\s*transformed\.self_healer_webhook_url \|\| ''/);
+  assert.match(source, /execution_id:\s*transformed\.execution_id \|\| ''/);
+  assert.match(source, /n8n_api_key:\s*transformed\.n8n_api_key \|\| ''/);
+  assert.match(source, /execution_context:\s*\$json\.execution_context \|\| null/);
 });
 
 test('error simulator falls back cleanly for unknown scenarios', () => {
