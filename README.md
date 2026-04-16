@@ -2,13 +2,7 @@
 
 Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
 
-The repository now matches the live verified project state instead of the earlier scaffold state:
-
-- `API Data Sync` workflow ID: `jBbMvA2RK39YlEM9`
-- `Self-Healer` workflow ID: `85XCB5Us5UVyu3Da`
-- `Error Generator` workflow ID: `rWAEEC4nCqojdRtu`
-- verified against `http://172.31.224.1:5678` on April 16, 2026
-- execution `1871` confirmed `diagnosis_source=openrouter`, `fix_strategy=escalate`, and Slack returned `{"data":"ok"}`
+Tracked live-instance details, workflow IDs, and dated verification evidence live in [docs/verification.md](docs/verification.md).
 
 ## What The Project Does
 
@@ -171,14 +165,13 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
 ## Current Status
 
 - local validation passes with `npm run validate:workflows`
-- the committed workflow sources now include the live workflow IDs and active state
 - the public caller workflows propagate payload-supplied runtime credentials into the healer
 - Beads issue tracking is initialized and `bd prime` restores repo context
 
 ## Acceptance
 
-- [x] Primary workflow implemented and verified in n8n
+- [x] Primary workflow implemented
 - [x] Self-healer implemented with OpenRouter diagnosis and deterministic fallback
 - [x] Error simulator implemented with six failure classes
 - [x] Runtime credential flow is payload-driven end to end
-- [x] README reflects the live verified project state
+- [x] README reflects stable setup and usage guidance
