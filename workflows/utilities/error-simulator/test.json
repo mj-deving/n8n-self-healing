@@ -1,0 +1,22 @@
+[
+  {
+    "description": "Parse error scenario",
+    "input": {
+      "error_type": "parse"
+    },
+    "expected": {
+      "status": "healed",
+      "scenario": "parse"
+    }
+  },
+  {
+    "description": "Schema error scenario",
+    "input": {
+      "error_type": "schema"
+    },
+    "expected": {
+      "status": "healed",
+      "scenario": "schema"
+    }
+  }
+]

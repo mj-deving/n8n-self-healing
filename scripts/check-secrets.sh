@@ -75,6 +75,7 @@ PATTERNS=(
     # Provider-specific keys
     'sk-[A-Za-z0-9_-]{20,}|OpenAI API Key'
     'sk-ant-[A-Za-z0-9_-]{20,}|Anthropic API Key'
+    'sk-or-v1-[A-Za-z0-9_-]{20,}|OpenRouter API Key'
     'AIza[A-Za-z0-9_-]{30,}|Google API Key'
     'ghp_[A-Za-z0-9]{36}|GitHub Personal Access Token'
     'gho_[A-Za-z0-9]{36}|GitHub OAuth Token'
