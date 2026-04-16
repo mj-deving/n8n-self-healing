@@ -9,7 +9,7 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
-test('self-healer collapses diagnosis into one code node with historical and OpenRouter paths', () => {
+test('self-healer keeps diagnosis logic in one code node and externalizes OpenRouter I/O', () => {
   const source = read('workflows/agents/self-healer/workflow/workflow.ts');
 
   assert.match(source, /name: 'Diagnose Error'/);
@@ -17,12 +17,12 @@ test('self-healer collapses diagnosis into one code node with historical and Ope
   assert.match(source, /\$\('Normalize Error Input'\)\.first\(\)\.json/);
   assert.match(source, /const relevantHistory = healHistory/);
   assert.match(source, /const historicalMatches = relevantHistory/);
-  assert.match(source, /\$helpers\.httpRequest\(\{/);
   assert.match(source, /diagnosis_source: 'historical'/);
   assert.match(source, /historicalEntry\?\.success_rate\?\.by_strategy/);
   assert.match(source, /upstream_reachable: upstreamReachable/);
   assert.match(source, /execution_context: executionSummary/);
-  assert.match(source, /diagnosis_source: 'openrouter'/);
+  assert.match(source, /should_call_openrouter:/);
+  assert.match(source, /openrouter_request_body:/);
   assert.match(source, /diagnosis_source: 'deterministic'/);
   assert.match(source, /name: 'Check Upstream Health'/);
   assert.match(source, /name: 'Build Upstream Context'/);
@@ -33,17 +33,25 @@ test('self-healer collapses diagnosis into one code node with historical and Ope
   assert.match(source, /failed_node_input:/);
   assert.match(source, /source_node:/);
   assert.match(source, /Execution inspection confirmed/);
+  assert.match(source, /name: 'Route Diagnosis Provider'/);
+  assert.match(source, /name: 'OpenRouter Diagnosis'/);
+  assert.match(source, /name: 'Extract OpenRouter Diagnosis'/);
+  assert.match(source, /diagnosis_source: 'openrouter'/);
   assert.match(source, /name: 'Wait For Parallel Context'/);
   assert.match(source, /this\.NormalizeErrorInput\.out\(0\)\.to\(this\.CheckUpstreamHealth\.in\(0\)\);/);
   assert.match(source, /this\.NormalizeErrorInput\.out\(0\)\.to\(this\.FetchExecutionContext\.in\(0\)\);/);
   assert.match(source, /this\.WaitForParallelContext\.out\(0\)\.to\(this\.DiagnoseError\.in\(0\)\);/);
-  assert.match(source, /this\.DiagnoseError\.out\(0\)\.to\(this\.RouteFixStrategy\.in\(0\)\);/);
+  assert.match(source, /this\.DiagnoseError\.out\(0\)\.to\(this\.RouteDiagnosisProvider\.in\(0\)\);/);
+  assert.match(source, /this\.RouteDiagnosisProvider\.out\(0\)\.to\(this\.OpenRouterDiagnosis\.in\(0\)\);/);
+  assert.match(source, /this\.RouteDiagnosisProvider\.out\(1\)\.to\(this\.RouteFixStrategy\.in\(0\)\);/);
+  assert.match(source, /this\.OpenRouterDiagnosis\.out\(0\)\.to\(this\.ExtractOpenRouterDiagnosis\.in\(0\)\);/);
+  assert.match(source, /this\.ExtractOpenRouterDiagnosis\.out\(0\)\.to\(this\.RouteFixStrategy\.in\(0\)\);/);
 
   assert.doesNotMatch(source, /name: 'Prepare Model Request'/);
   assert.doesNotMatch(source, /name: 'Route Diagnosis Mode'/);
-  assert.doesNotMatch(source, /name: 'OpenRouter Diagnosis'/);
   assert.doesNotMatch(source, /name: 'Extract Model Diagnosis'/);
   assert.doesNotMatch(source, /name: 'Mock Diagnosis'/);
+  assert.doesNotMatch(source, /\$helpers\.httpRequest\(\{/);
 });
 
 test('self-healer preserves slack webhook context into healed alerts', () => {
