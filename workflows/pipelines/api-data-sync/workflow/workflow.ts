@@ -87,6 +87,8 @@ const openrouterApiKey = String(body.openrouter_api_key || '');
 const openrouterModel = String(body.openrouter_model || '');
 const slackWebhookUrl = String(body.slack_webhook_url || '');
 const selfHealerWebhookUrl = String(body.self_healer_webhook_url || 'http://172.31.224.1:5678/webhook/self-healer');
+const n8nApiKey = String(body.n8n_api_key || '');
+const executionId = typeof $execution?.id === 'undefined' ? '' : String($execution.id);
 
 return {
   json: {
@@ -99,7 +101,9 @@ return {
     openrouter_api_key: openrouterApiKey,
     openrouter_model: openrouterModel,
     slack_webhook_url: slackWebhookUrl,
-    self_healer_webhook_url: selfHealerWebhookUrl
+    self_healer_webhook_url: selfHealerWebhookUrl,
+    execution_id: executionId,
+    n8n_api_key: n8nApiKey
   }
 };`,
     };
@@ -161,6 +165,8 @@ return [{
     openrouter_model: request.openrouter_model || '',
     slack_webhook_url: request.slack_webhook_url || '',
     self_healer_webhook_url: request.self_healer_webhook_url || '',
+    execution_id: request.execution_id || '',
+    n8n_api_key: request.n8n_api_key || '',
     transformed,
     recordCount: transformed.length
   }
@@ -267,7 +273,9 @@ return {
     openrouter_api_key: request.openrouter_api_key || '',
     openrouter_model: request.openrouter_model || '',
     slack_webhook_url: request.slack_webhook_url || '',
-    self_healer_webhook_url: request.self_healer_webhook_url || ''
+    self_healer_webhook_url: request.self_healer_webhook_url || '',
+    execution_id: request.execution_id || '',
+    n8n_api_key: request.n8n_api_key || ''
   }
 };`,
     };
@@ -300,7 +308,9 @@ return {
     openrouter_api_key: request.openrouter_api_key || '',
     openrouter_model: request.openrouter_model || '',
     slack_webhook_url: request.slack_webhook_url || '',
-    self_healer_webhook_url: request.self_healer_webhook_url || ''
+    self_healer_webhook_url: request.self_healer_webhook_url || '',
+    execution_id: request.execution_id || '',
+    n8n_api_key: request.n8n_api_key || ''
   }
 };`,
     };
@@ -335,7 +345,9 @@ return {
     openrouter_api_key: transformed.openrouter_api_key || '',
     openrouter_model: transformed.openrouter_model || '',
     slack_webhook_url: transformed.slack_webhook_url || '',
-    self_healer_webhook_url: transformed.self_healer_webhook_url || ''
+    self_healer_webhook_url: transformed.self_healer_webhook_url || '',
+    execution_id: transformed.execution_id || '',
+    n8n_api_key: transformed.n8n_api_key || ''
   }
 };`,
     };
@@ -377,7 +389,9 @@ return {
     workflow: 'API Data Sync',
     diagnosis: $json.diagnosis || 'No diagnosis returned',
     strategy: $json.strategy || $json.fix_strategy || 'unknown',
-    outcome: $json.outcome || 'unknown'
+    outcome: $json.outcome || 'unknown',
+    execution_id: $json.execution_id || $json.execution_context?.id || '',
+    execution_context: $json.execution_context || null
   }
 };`,
     };

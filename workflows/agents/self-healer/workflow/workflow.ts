@@ -126,6 +126,9 @@ const historicalMatches = relevantHistory
   .slice(-5);
 const upstreamReachable = upstreamContext?.upstream_reachable ?? 'unknown';
 const executionSummary = executionContextData?.execution_context || null;
+const executionInsight = executionSummary?.failed_node
+  ? 'Execution inspection confirmed ' + executionSummary.failed_node + (executionSummary.error_message ? ' failed with: ' + executionSummary.error_message : '.')
+  : '';
 
 const strategyCounts = historicalMatches.reduce((acc, entry) => {
   const strategy = entry.fix_strategy || entry.strategy || entry.repaired_with || '';
@@ -152,7 +155,7 @@ if (dominantStrategy && dominantStrategy[1] >= 3) {
       diagnosis: historicalEntry?.ai_diagnosis || ('Previously healed ' + dominantStrategy[1] + ' times with ' + dominantStrategy[0] + '.'),
       fix_strategy: dominantStrategy[0],
       wait_seconds: Number(historicalEntry?.total_heal_time_ms || 0) / 1000,
-      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ' via ' + dominantStrategy[0] + ': ' + formattedSuccessRate,
+      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ' via ' + dominantStrategy[0] + ': ' + formattedSuccessRate + (executionInsight ? '. ' + executionInsight : ''),
       upstream_reachable: upstreamReachable,
       execution_context: executionSummary
     }
@@ -295,6 +298,10 @@ if (!diagnosis) {
   };
 }
 
+if (executionInsight) {
+  diagnosis.details = (diagnosis.details || diagnosis.diagnosis) + ' ' + executionInsight;
+}
+
 return {
   json: {
     ...ctx,
@@ -358,7 +365,7 @@ return {
     })
     FetchExecutionContext = {
         method: 'GET',
-        url: '={{ $json.execution_id ? "http://172.31.224.1:5678/api/v1/executions/" + $json.execution_id : "https://example.invalid/skip-execution-context" }}',
+        url: '={{ $json.execution_id ? "http://172.31.224.1:5678/api/v1/executions/" + $json.execution_id + "?includeData=true" : "https://example.invalid/skip-execution-context" }}',
         authentication: 'none',
         sendHeaders: true,
         specifyHeaders: 'keypair',
@@ -391,8 +398,8 @@ if (!original.execution_id || !original.n8n_api_key) {
   };
 }
 
-const errorMessage = $json.error?.message || $json.message || '';
-if (errorMessage) {
+const requestError = $json.error?.message || $json.message || '';
+if (requestError) {
   return {
     json: {
       execution_context: null
@@ -400,17 +407,131 @@ if (errorMessage) {
   };
 }
 
-const payload = $json.data || $json;
-const executionError = payload.resultData?.error || payload.data?.resultData?.error || {};
+const responsePayload = $json || {};
+const executionPayload = responsePayload.id ? responsePayload : (responsePayload.data?.id ? responsePayload.data : responsePayload);
+const workflowData = responsePayload.workflowData || executionPayload.workflowData || {};
+const resultData = executionPayload.data?.resultData || executionPayload.resultData || {};
+const runData = resultData.runData || {};
+const runtimeData = resultData.runtimeData || {};
+const executionError = resultData.error || {};
+
+function toPlain(value) {
+  if (value === null || typeof value === 'undefined') {
+    return null;
+  }
+
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch (error) {
+    return String(value);
+  }
+}
+
+function summarize(value, depth = 0) {
+  const plain = toPlain(value);
+
+  if (plain === null || typeof plain !== 'object') {
+    return plain;
+  }
+
+  if (depth >= 2) {
+    return Array.isArray(plain) ? '[array]' : '[object]';
+  }
+
+  if (Array.isArray(plain)) {
+    return plain.slice(0, 2).map((item) => summarize(item, depth + 1));
+  }
+
+  return Object.fromEntries(
+    Object.entries(plain)
+      .slice(0, 8)
+      .map(([key, entryValue]) => [key, summarize(entryValue, depth + 1)])
+  );
+}
+
+function getLatestRun(nodeName) {
+  const entries = runData[nodeName];
+  return Array.isArray(entries) && entries.length ? entries[entries.length - 1] : null;
+}
+
+function getOutputJson(nodeName, outputIndex = 0) {
+  const run = getLatestRun(nodeName);
+  const bucket = run?.data?.main?.[outputIndex];
+  return Array.isArray(bucket) && bucket[0]?.json ? bucket[0].json : null;
+}
+
+function inspectNode(nodeName) {
+  if (!nodeName) {
+    return null;
+  }
+
+  const run = getLatestRun(nodeName);
+  if (!run) {
+    return null;
+  }
+
+  const outputs = Array.isArray(run.data?.main)
+    ? run.data.main.flatMap((bucket, outputIndex) => (
+        Array.isArray(bucket)
+          ? bucket.map((item) => ({ outputIndex, json: item?.json || null }))
+          : []
+      ))
+    : [];
+
+  const errorOutput = outputs.find((entry) => (
+    entry.outputIndex > 0 && entry.json && (entry.json.error || entry.json.error_message || entry.json.message)
+  ));
+  const regularOutput = outputs.find((entry) => entry.outputIndex === 0 && entry.json);
+  const source = Array.isArray(run.source) && run.source.length ? run.source[0] : null;
+  const sourceNode = source?.previousNode || '';
+  const sourceOutputIndex = typeof source?.previousNodeOutput === 'number' ? source.previousNodeOutput : 0;
+  const sourceJson = sourceNode ? getOutputJson(sourceNode, sourceOutputIndex) : null;
+  const errorJson = errorOutput?.json || null;
+
+  return {
+    node_name: nodeName,
+    source_node: sourceNode,
+    source_output_index: sourceOutputIndex,
+    error_output_index: typeof errorOutput?.outputIndex === 'number' ? errorOutput.outputIndex : null,
+    execution_status: run.executionStatus || '',
+    execution_time_ms: Number(run.executionTime || 0),
+    input_preview: summarize(sourceJson || original.input_data || null),
+    output_preview: summarize(regularOutput?.json || null),
+    error_message: errorJson?.error || errorJson?.error_message || errorJson?.message || '',
+    error_payload: summarize(errorJson),
+  };
+}
+
+const candidateNodes = Array.from(new Set([
+  String(original.node_name || ''),
+  String(executionError.node || ''),
+])).filter(Boolean);
+
+const inspectedNode = candidateNodes
+  .map((nodeName) => inspectNode(nodeName))
+  .find((entry) => entry && (entry.error_message || entry.error_payload || entry.input_preview))
+  || inspectNode(String(original.node_name || ''))
+  || null;
 
 return {
   json: {
     execution_context: {
-      id: payload.id || original.execution_id,
-      status: payload.status || '',
-      mode: payload.mode || '',
-      failed_node: executionError.node || '',
-      error_message: executionError.message || ''
+      id: executionPayload.id || responsePayload.id || original.execution_id,
+      workflow_id: executionPayload.workflowId || responsePayload.workflowId || workflowData.id || '',
+      workflow_name: workflowData.name || original.workflow_name || '',
+      status: executionPayload.status || responsePayload.status || '',
+      mode: executionPayload.mode || responsePayload.mode || '',
+      started_at: executionPayload.startedAt || responsePayload.startedAt || '',
+      stopped_at: executionPayload.stoppedAt || responsePayload.stoppedAt || '',
+      trigger_node: runtimeData.triggerNode?.name || '',
+      failed_node: inspectedNode?.node_name || executionError.node || original.node_name || '',
+      source_node: inspectedNode?.source_node || '',
+      error_message: inspectedNode?.error_message || executionError.message || original.error_message || '',
+      failed_node_input: inspectedNode?.input_preview || summarize(original.input_data || null),
+      failed_node_output: inspectedNode?.output_preview || null,
+      error_payload: inspectedNode?.error_payload || summarize(executionError),
+      node_execution_status: inspectedNode?.execution_status || '',
+      node_execution_time_ms: inspectedNode?.execution_time_ms || 0,
     }
   }
 };`,
@@ -654,6 +775,8 @@ const entry = {
   total_heal_time_ms: Number($json.wait_seconds || 0) * 1000,
   details: $json.details || '',
   upstream_reachable: $json.upstream_reachable ?? 'unknown',
+  execution_id: $json.execution_id || $json.execution_context?.id || '',
+  execution_context: $json.execution_context || null,
 };
 
 const existing = Array.isArray(staticData.healLog) ? staticData.healLog : [];
@@ -730,6 +853,8 @@ return {
     diagnosis_source: $json.diagnosis_source,
     upstream_reachable: $json.upstream_reachable ?? 'unknown',
     slack_webhook_url: $json.slack_webhook_url || '',
+    execution_id: $json.execution_id || '',
+    execution_context: $json.execution_context || null,
     success_rate: entry.success_rate,
     log_entry: entry,
     storage_backend: 'workflow_static_data'
@@ -789,7 +914,9 @@ return {
     strategy: payload.strategy,
     outcome: payload.outcome,
     workflow: payload.workflow,
-    retry_count: payload.retry_count
+    retry_count: payload.retry_count,
+    execution_id: payload.execution_id || payload.execution_context?.id || '',
+    execution_context: payload.execution_context || null
   }
 };`,
     };
