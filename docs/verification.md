@@ -32,6 +32,31 @@ Relevant payload fields:
 - `Send Escalation Alert` succeeded.
 - Slack returned `{"data":"ok"}`.
 
+## Fresh Live Checks
+
+Happy path recheck from the primary workflow:
+
+- `POST /webhook/api-data-sync` with `{"max_items":2}` returned `status=success`
+- response confirmed `records_synced=2`
+- storage backend reported `workflow_static_data`
+
+Six-scenario simulator pass on April 16, 2026:
+
+| Scenario | Result | Strategy | Outcome |
+|---|---|---|---|
+| `429` | healed | `backoff` | healed |
+| `500` | healed | `retry` | healed |
+| `401` | escalated | `escalate` | escalated |
+| `parse` | healed | `fallback` | healed |
+| `timeout` | healed | `backoff` | healed |
+| `schema` | healed | `fallback` | healed |
+
+Notes:
+
+- The simulator run used a present `OPENROUTER_API_KEY` in the shell, so model-backed diagnosis was available during this pass.
+- `SLACK_WEBHOOK_URL` was not present in the current shell during the six-scenario rerun, so the fresh simulator pass confirms routing and outcomes but not live Slack delivery for that specific rerun.
+- Live Slack delivery was already confirmed separately by execution `1871`.
+
 ## Repository Alignment
 
 The committed workflow source files carry the live workflow IDs and active state, and the public caller workflows propagate payload-supplied runtime configuration into the self-healer request path.
