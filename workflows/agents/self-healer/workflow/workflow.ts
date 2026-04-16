@@ -2,7 +2,7 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 
 // <workflow-map>
 // Workflow : Self-Healer
-// Nodes   : 17  |  Connections: 22
+// Nodes   : 17  |  Connections: 23
 // </workflow-map>
 
 @workflow({
@@ -102,212 +102,179 @@ return {
 
     @node({
         id: 'b1000002-0001-4000-8000-000000000004',
-        name: 'Prepare Model Request',
+        name: 'Diagnose Error',
         type: 'n8n-nodes-base.code',
         version: 2,
-        position: [520, 260],
+        position: [900, 260],
     })
-    PrepareModelRequest = {
+    DiagnoseError = {
         mode: 'runOnceForEachItem',
         language: 'javaScript',
         jsCode: `const ctx = $json;
-const requestBody = {
-  max_tokens: 256,
-  response_format: { type: 'json_object' },
-  messages: [
-    {
-      role: 'system',
-      content: 'You are an n8n workflow error diagnostician. Analyze the error and respond with JSON: { "diagnosis": string, "fix_strategy": "retry"|"backoff"|"fallback"|"escalate", "wait_seconds": number, "details": string }.'
-    },
-    {
-      role: 'user',
-      content: JSON.stringify({
-        error_type: ctx.error_type,
-        error_message: ctx.error_message,
-        node_name: ctx.node_name,
-        workflow_name: ctx.workflow_name,
-        input_data: ctx.input_data,
-        timestamp: ctx.timestamp
-      }, null, 2)
-    }
-  ]
-};
+const staticData = $getWorkflowStaticData('global');
+const healLog = Array.isArray(staticData.healLog) ? staticData.healLog : [];
+const historicalMatches = healLog
+  .filter((entry) => entry && entry.error_type === ctx.error_type && entry.outcome === 'healed')
+  .slice(-5);
 
-if (ctx.openrouter_model) {
-  requestBody.model = ctx.openrouter_model;
+const strategyCounts = historicalMatches.reduce((acc, entry) => {
+  const strategy = entry.fix_strategy || entry.strategy || entry.repaired_with || '';
+  if (strategy) {
+    acc[strategy] = (acc[strategy] || 0) + 1;
+  }
+  return acc;
+}, {});
+
+const dominantStrategy = Object.entries(strategyCounts)
+  .sort((left, right) => right[1] - left[1])[0];
+
+if (dominantStrategy && dominantStrategy[1] >= 3) {
+  const historicalEntry = [...historicalMatches]
+    .reverse()
+    .find((entry) => (entry.fix_strategy || entry.strategy || entry.repaired_with) === dominantStrategy[0]) || historicalMatches[historicalMatches.length - 1];
+
+  return {
+    json: {
+      ...ctx,
+      diagnosis_source: 'historical',
+      diagnosis: historicalEntry?.ai_diagnosis || ('Previously healed ' + dominantStrategy[1] + ' times with ' + dominantStrategy[0] + '.'),
+      fix_strategy: dominantStrategy[0],
+      wait_seconds: Number(historicalEntry?.total_heal_time_ms || 0) / 1000,
+      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ': ' + dominantStrategy[1] + '/' + historicalMatches.length
+    }
+  };
 }
 
-return {
-  json: {
-    ...ctx,
-    requestBody: JSON.stringify(requestBody)
+let diagnosis = null;
+
+if (ctx.openrouter_api_key) {
+  try {
+    const response = await $helpers.httpRequest({
+      method: 'POST',
+      url: 'https://openrouter.ai/api/v1/chat/completions',
+      headers: {
+        Authorization: 'Bearer ' + ctx.openrouter_api_key,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://github.com/mj-deving/n8n-self-healing',
+        'X-OpenRouter-Title': 'n8n-self-healing',
+      },
+      body: {
+        model: ctx.openrouter_model || 'anthropic/claude-haiku-4-5',
+        max_tokens: 256,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You are an n8n workflow error diagnostician. Respond with JSON: { "diagnosis": string, "fix_strategy": "retry"|"backoff"|"fallback"|"escalate", "wait_seconds": number, "details": string }.'
+          },
+          {
+            role: 'user',
+            content: JSON.stringify({
+              error_type: ctx.error_type,
+              error_message: ctx.error_message,
+              node_name: ctx.node_name,
+              workflow_name: ctx.workflow_name,
+              input_data: ctx.input_data,
+              timestamp: ctx.timestamp
+            }, null, 2)
+          }
+        ]
+      },
+      json: true
+    });
+
+    const content = response?.choices?.[0]?.message?.content || '';
+    const text = Array.isArray(content)
+      ? content.map((part) => part.text || part.content || '').join('\\n').trim()
+      : String(content || '').trim();
+    const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+
+    diagnosis = {
+      diagnosis_source: 'openrouter',
+      diagnosis: parsed.diagnosis,
+      fix_strategy: parsed.fix_strategy,
+      wait_seconds: Number(parsed.wait_seconds || 0),
+      details: parsed.details || parsed.diagnosis
+    };
+  } catch (error) {
+    diagnosis = null;
   }
-};`,
-    };
+}
 
-    @node({
-        id: 'b1000002-0001-4000-8000-000000000005',
-        name: 'Route Diagnosis Mode',
-        type: 'n8n-nodes-base.switch',
-        version: 3.4,
-        position: [780, 260],
-    })
-    RouteDiagnosisMode = {
-        mode: 'expression',
-        numberOutputs: 2,
-        output: '={{ $json.openrouter_api_key ? 0 : 1 }}',
-        options: {},
-    };
+if (!diagnosis) {
+  const matrix = {
+    '429': {
+      diagnosis: 'The upstream API is rate limiting requests.',
+      fix_strategy: 'backoff',
+      wait_seconds: 30,
+      details: 'Wait and retry a healthy endpoint after the backoff window.'
+    },
+    '500': {
+      diagnosis: 'The upstream service returned an internal error.',
+      fix_strategy: 'retry',
+      wait_seconds: 0,
+      details: 'Retry once against the recovery URL.'
+    },
+    '401': {
+      diagnosis: 'Authentication failed and requires credential rotation.',
+      fix_strategy: 'escalate',
+      wait_seconds: 0,
+      details: 'Escalation is required because secrets cannot be repaired automatically.'
+    },
+    'parse': {
+      diagnosis: 'The payload could not be parsed safely.',
+      fix_strategy: 'fallback',
+      wait_seconds: 0,
+      details: 'Switch to a safe fallback payload.'
+    },
+    'timeout': {
+      diagnosis: 'The dependency timed out before returning a response.',
+      fix_strategy: 'backoff',
+      wait_seconds: 15,
+      details: 'Retry after a short delay with a longer timeout budget.'
+    },
+    'schema': {
+      diagnosis: 'The response schema changed or was malformed.',
+      fix_strategy: 'fallback',
+      wait_seconds: 0,
+      details: 'Use an adapter fallback to normalize the shape.'
+    },
+    'write': {
+      diagnosis: 'The destination write path is unavailable.',
+      fix_strategy: 'fallback',
+      wait_seconds: 0,
+      details: 'Queue the payload in a fallback file so the sync is not lost.'
+    },
+    'fetch': {
+      diagnosis: 'The source API call failed before the transform stage.',
+      fix_strategy: 'retry',
+      wait_seconds: 0,
+      details: 'Retry the source request once.'
+    }
+  };
 
-    @node({
-        id: 'b1000002-0001-4000-8000-000000000006',
-        name: 'OpenRouter Diagnosis',
-        type: 'n8n-nodes-base.httpRequest',
-        version: 4.4,
-        position: [1040, 160],
-        onError: 'continueErrorOutput',
-    })
-    OpenRouterDiagnosis = {
-        method: 'POST',
-        url: 'https://openrouter.ai/api/v1/chat/completions',
-        authentication: 'none',
-        sendHeaders: true,
-        specifyHeaders: 'keypair',
-        headerParameters: {
-            parameters: [
-                { name: 'Authorization', value: '={{ "Bearer " + $json.openrouter_api_key }}' },
-                { name: 'HTTP-Referer', value: 'https://github.com/mj-deving/n8n-self-healing' },
-                { name: 'X-OpenRouter-Title', value: 'n8n-self-healing' },
-                { name: 'content-type', value: 'application/json' },
-            ],
-        },
-        sendBody: true,
-        contentType: 'raw',
-        rawContentType: 'application/json',
-        body: '={{ $json.requestBody }}',
-        responseType: 'json',
-        options: {},
-    };
-
-    @node({
-        id: 'b1000002-0001-4000-8000-000000000007',
-        name: 'Extract Model Diagnosis',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [1300, 160],
-    })
-    ExtractModelDiagnosis = {
-        mode: 'runOnceForEachItem',
-        language: 'javaScript',
-        jsCode: `const ctx = $('Prepare Model Request').item.json;
-const content = $json.choices?.[0]?.message?.content;
-const text = Array.isArray(content)
-  ? content.map((part) => part.text || part.content || '').join('\\n').trim()
-  : String(content || '').trim();
-const jsonMatch = text.match(/\\{[\\s\\S]*\\}/);
-let diagnosis;
-
-try {
-  diagnosis = JSON.parse(jsonMatch ? jsonMatch[0] : text);
-} catch (error) {
-  diagnosis = {
-    diagnosis: 'The model returned non-JSON output; falling back to escalation.',
+  const result = matrix[ctx.error_type] || {
+    diagnosis: 'The failure did not match a known repair pattern.',
     fix_strategy: 'escalate',
     wait_seconds: 0,
-    details: text || 'No model output'
+    details: 'Escalate for manual review.'
+  };
+
+  diagnosis = {
+    ...result,
+    diagnosis_source: 'deterministic'
   };
 }
 
 return {
   json: {
     ...ctx,
-    diagnosis_source: 'openrouter',
+    diagnosis_source: diagnosis.diagnosis_source,
     diagnosis: diagnosis.diagnosis,
     fix_strategy: diagnosis.fix_strategy,
     wait_seconds: Number(diagnosis.wait_seconds || 0),
     details: diagnosis.details || diagnosis.diagnosis
-  }
-};`,
-    };
-
-    @node({
-        id: 'b1000002-0001-4000-8000-000000000008',
-        name: 'Mock Diagnosis',
-        type: 'n8n-nodes-base.code',
-        version: 2,
-        position: [1040, 360],
-    })
-    MockDiagnosis = {
-        mode: 'runOnceForEachItem',
-        language: 'javaScript',
-        jsCode: `const ctx = $json.error_type ? $json : $('Prepare Model Request').item.json;
-
-const matrix = {
-  '429': {
-    diagnosis: 'The upstream API is rate limiting requests.',
-    fix_strategy: 'backoff',
-    wait_seconds: 30,
-    details: 'Wait and retry a healthy endpoint after the backoff window.'
-  },
-  '500': {
-    diagnosis: 'The upstream service returned an internal error.',
-    fix_strategy: 'retry',
-    wait_seconds: 0,
-    details: 'Retry once against the recovery URL.'
-  },
-  '401': {
-    diagnosis: 'Authentication failed and requires credential rotation.',
-    fix_strategy: 'escalate',
-    wait_seconds: 0,
-    details: 'Escalation is required because secrets cannot be repaired automatically.'
-  },
-  'parse': {
-    diagnosis: 'The payload could not be parsed safely.',
-    fix_strategy: 'fallback',
-    wait_seconds: 0,
-    details: 'Switch to a safe fallback payload.'
-  },
-  'timeout': {
-    diagnosis: 'The dependency timed out before returning a response.',
-    fix_strategy: 'backoff',
-    wait_seconds: 15,
-    details: 'Retry after a short delay with a longer timeout budget.'
-  },
-  'schema': {
-    diagnosis: 'The response schema changed or was malformed.',
-    fix_strategy: 'fallback',
-    wait_seconds: 0,
-    details: 'Use an adapter fallback to normalize the shape.'
-  },
-  'write': {
-    diagnosis: 'The destination write path is unavailable.',
-    fix_strategy: 'fallback',
-    wait_seconds: 0,
-    details: 'Queue the payload in a fallback file so the sync is not lost.'
-  },
-  'fetch': {
-    diagnosis: 'The source API call failed before the transform stage.',
-    fix_strategy: 'retry',
-    wait_seconds: 0,
-    details: 'Retry the source request once.'
-  }
-};
-
-const result = matrix[ctx.error_type] || {
-  diagnosis: 'The failure did not match a known repair pattern.',
-  fix_strategy: 'escalate',
-  wait_seconds: 0,
-  details: 'Escalate for manual review.'
-};
-
-return {
-  json: {
-    ...ctx,
-    diagnosis_source: 'mock',
-    diagnosis: result.diagnosis,
-    fix_strategy: result.fix_strategy,
-    wait_seconds: result.wait_seconds,
-    details: result.details
   }
 };`,
     };
@@ -620,17 +587,8 @@ return {
         this.ExecuteWorkflowTrigger.out(0).to(this.NormalizeErrorInput.in(0));
         this.HealerWebhook.out(0).to(this.NormalizeErrorInput.in(0));
 
-        this.NormalizeErrorInput.out(0).to(this.PrepareModelRequest.in(0));
-        this.PrepareModelRequest.out(0).to(this.RouteDiagnosisMode.in(0));
-
-        this.RouteDiagnosisMode.out(0).to(this.OpenRouterDiagnosis.in(0));
-        this.RouteDiagnosisMode.out(1).to(this.MockDiagnosis.in(0));
-
-        this.OpenRouterDiagnosis.out(0).to(this.ExtractModelDiagnosis.in(0));
-        this.OpenRouterDiagnosis.out(1).to(this.MockDiagnosis.in(0));
-
-        this.ExtractModelDiagnosis.out(0).to(this.RouteFixStrategy.in(0));
-        this.MockDiagnosis.out(0).to(this.RouteFixStrategy.in(0));
+        this.NormalizeErrorInput.out(0).to(this.DiagnoseError.in(0));
+        this.DiagnoseError.out(0).to(this.RouteFixStrategy.in(0));
 
         this.RouteFixStrategy.out(0).to(this.RetryOriginalRequest.in(0));
         this.RouteFixStrategy.out(1).to(this.WaitBeforeRetry.in(0));
