@@ -8,6 +8,7 @@ dist/
 # AI session artifacts
 .ai/
 .sessions/
+.codex
 .codex/
 .mcp.json
 
@@ -19,6 +20,10 @@ Plans/
 
 # n8nac runtime config (instance-specific)
 n8nac-config.json
+*:*_*/personal/.n8n-state.json
+*:*_*/personal/*.workflow.ts
+*:*_*/personal/n8n-workflows.d.ts
+*:*_*/personal/tsconfig.json
 
 # Environment
 .env
