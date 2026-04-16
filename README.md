@@ -2,7 +2,7 @@
 
 Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
 
-Tracked live-instance details, workflow IDs, and dated verification evidence live in [docs/verification.md](docs/verification.md).
+Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
 
 ## What The Project Does
 
@@ -165,6 +165,8 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
 ## Current Status
 
 - local validation passes with `npm run validate:workflows`
+- all 3 workflow sources are pushed and verified in n8n
+- happy-path sync and all 6 simulator scenarios have been rechecked live
 - the public caller workflows propagate payload-supplied runtime credentials into the healer
 - Beads issue tracking is initialized and `bd prime` restores repo context
 
@@ -174,4 +176,6 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
 - [x] Self-healer implemented with OpenRouter diagnosis and deterministic fallback
 - [x] Error simulator implemented with six failure classes
 - [x] Runtime credential flow is payload-driven end to end
+- [x] Workflows pushed and verified in n8n
+- [x] Live healing scenarios tested and documented
 - [x] README reflects stable setup and usage guidance
