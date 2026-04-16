@@ -2,7 +2,7 @@
 
 Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
 
-Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
+Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md). Production-polish monitoring guidance lives in [docs/monitoring.md](docs/monitoring.md).
 
 Operators maintaining the live workflows should use [docs/runbook.md](docs/runbook.md) for the verification sequence, failure classification, and common troubleshooting steps.
 
