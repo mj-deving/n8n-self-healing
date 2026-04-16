@@ -1,8 +1,8 @@
 # Self-Healing n8n Workflow
 
-Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
+Production-shaped n8n workflow set for detecting failures, diagnosing them through historical patterns, deterministic strategy rules, and optional OpenRouter enrichment, applying a recovery strategy, and emitting Slack-style healed, escalated, and monitoring alerts.
 
-Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
+Status: v2 upgrades are implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
 
 For ongoing maintenance:
 
@@ -11,9 +11,10 @@ For ongoing maintenance:
 
 ## What The Project Does
 
-- `API Data Sync` fetches remote data, transforms it, stores the latest output snapshot in workflow static data, and forwards failures to the self-healer.
-- `Self-Healer` accepts structured error payloads, chooses between OpenRouter diagnosis and deterministic fallback logic, retries/backoffs/falls back/escalates, writes a heal log to workflow static data, and posts Slack-style alerts.
+- `API Data Sync` fetches remote data, transforms it, stores the latest output snapshot in workflow static data, and forwards failures plus execution context to the self-healer.
+- `Self-Healer` accepts structured error payloads, checks heal history first, enriches diagnosis with upstream health and optional execution inspection, optionally calls OpenRouter through workflow HTTP nodes, retries/backoffs/falls back/escalates, writes a heal log to workflow static data, and posts Slack-style alerts.
 - `Error Generator` gives you a safe way to trigger known failure classes and verify the healing loop end to end.
+- `Self-Healing Monitor` polls recent self-healer executions every 15 minutes or via webhook, aggregates thresholds, and emits warning or high-severity alert summaries.
 
 ## Runtime Model
 
@@ -24,15 +25,18 @@ The public webhook entrypoints accept and forward these fields:
 - `openrouter_api_key`
 - `openrouter_model` (optional override)
 - `slack_webhook_url`
+- `n8n_api_key` (required when a caller wants execution inspection or monitoring API queries)
+- `execution_id` (optional caller execution to inspect)
 - `self_healer_webhook_url` (optional override for callers; defaults to the local healer webhook)
 
-That means you can test the complete flow through `api-data-sync` or `simulate-error` without baking secrets into the workflow definition.
+That means you can test the complete flow through `api-data-sync`, `simulate-error`, or the monitor webhook without baking secrets into the workflow definition.
 
 ## Repository Layout
 
 - `workflows/pipelines/api-data-sync/` primary workflow package
 - `workflows/agents/self-healer/` healer workflow package
 - `workflows/utilities/error-simulator/` simulator workflow package
+- `workflows/utilities/monitor/` monitoring workflow package
 - `template/` scaffold source used by `npm run new-workflow`
 - `workflow/` single-workflow export placeholder retained for distribution tooling
 - `scripts/init-n8n.sh` non-interactive `n8nac` bootstrap helper
@@ -72,6 +76,7 @@ npm run check-secrets
 npx --yes n8nac push workflows/agents/self-healer/workflow/workflow.ts --verify
 npx --yes n8nac push workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
 npx --yes n8nac push workflows/utilities/error-simulator/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/utilities/monitor/workflow/workflow.ts --verify
 ```
 
 ## Webhook Endpoints
@@ -79,6 +84,7 @@ npx --yes n8nac push workflows/utilities/error-simulator/workflow/workflow.ts --
 - `POST /webhook/api-data-sync`
 - `POST /webhook/self-healer`
 - `POST /webhook/simulate-error`
+- `POST /webhook/self-healing-monitor`
 
 ## Example Requests
 
@@ -111,6 +117,23 @@ curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
 ```
 
 That request exercises the payload-driven credential path: the sync workflow raises a write failure, forwards the runtime values into the healer request, and the healer can use OpenRouter and Slack without relying on `$env`.
+
+If you also pass `n8n_api_key`, the caller forwards its own `execution_id`, and the healer inspects the live n8n execution while diagnosing:
+
+```bash
+curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "force_write_error": true,
+    "n8n_api_key": "'"$N8N_API_KEY"'"
+  }'
+```
+
+Expected healed response fields now include:
+
+- `execution_id`
+- `execution_context.failed_node`
+- `execution_context.failed_node_input`
 
 ### Simulate A Known Failure Class
 
@@ -153,10 +176,32 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
     "input_data": {"source_url": "https://jsonplaceholder.typicode.com/posts"},
     "retry_target_url": "",
     "retry_method": "GET",
+    "execution_id": "1234",
+    "n8n_api_key": "'"$N8N_API_KEY"'",
     "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
     "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
   }'
 ```
+
+### Call The Monitor Directly
+
+```bash
+curl -X POST http://172.31.224.1:5678/webhook/self-healing-monitor \
+  -H "Content-Type: application/json" \
+  -d '{
+    "n8n_api_key": "'"$N8N_API_KEY"'",
+    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'",
+    "expect_openrouter": false
+  }'
+```
+
+The monitor queries recent self-healer executions, evaluates alert thresholds from [docs/monitoring.md](docs/monitoring.md), and returns a summary with:
+
+- `status`
+- `severity`
+- `reasons`
+- `counts`
+- `alert_delivery_status`
 
 ## Expected Healing Strategies
 
@@ -173,17 +218,22 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
 
 - local contract tests pass with `npm test`
 - local validation passes with `npm run validate:workflows`
-- all 3 workflow sources are pushed and verified in n8n
-- happy-path sync and all 6 simulator scenarios have been rechecked live
+- all 4 workflow sources are pushed and verified in n8n
+- happy-path sync, healed failure paths, monitor polling, and all 6 simulator scenarios have been rechecked live
 - the public caller workflows propagate payload-supplied runtime credentials into the healer
+- the self-healer learns from heal history and can short-circuit to `diagnosis_source=historical`
+- upstream health and execution inspection are included in diagnosis context when available
+- OpenRouter I/O now runs through workflow HTTP nodes, not Code-node HTTP calls
 - Beads issue tracking is initialized and `bd prime` restores repo context
 
 ## Acceptance
 
 - [x] Primary workflow implemented
-- [x] Self-healer implemented with OpenRouter diagnosis and deterministic fallback
+- [x] Self-healer implemented with historical, deterministic, and optional OpenRouter diagnosis paths
 - [x] Error simulator implemented with six failure classes
+- [x] Monitoring workflow implemented and live-tested
 - [x] Runtime credential flow is payload-driven end to end
+- [x] Execution inspection is propagated from caller to healer
 - [x] Workflows pushed and verified in n8n
 - [x] Live healing scenarios tested and documented
 - [x] README reflects stable setup and usage guidance
