@@ -123,3 +123,18 @@ The benchmark confirms the main value claim for v2:
 - repeated known failures therefore become zero-token diagnoses
 - the largest savings are on retry and fallback patterns where execution time also drops
 - on backoff patterns, the LLM savings are still real, but total workflow runtime remains dominated by the wait window
+
+## Credit Refresh Rerun
+
+Second pass run on 2026-04-16 after OpenRouter credits were refreshed:
+
+| Case | Execution | Source | Tokens | Duration | Outcome | Notes |
+|---|---:|---|---:|---:|---|---|
+| Fresh unknown probe | `2010` | `openrouter` | 424 | 12211 ms | healed | Clean no-history OpenRouter path after credit refresh |
+| Fresh healable retry probe | `2011` | `openrouter` | 352 | 2881 ms | healed | Clean no-history OpenRouter retry path |
+| Simulator `401` | `2013` | `openrouter` | 585 | 9463 ms | escalated | LLM branch still active and measurable |
+| Simulator `timeout` | `2015` | `historical` | 0 | 5352 ms | healed | This moved from `openrouter` to `historical` because the earlier benchmark runs added enough healed timeout history |
+
+What changed:
+- OpenRouter-path consistency is restored for genuinely fresh no-history errors.
+- The live workflow state kept learning while I was benchmarking, so some simulator scenarios naturally migrated from `openrouter` to `historical`.
