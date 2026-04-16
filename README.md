@@ -4,7 +4,7 @@
 ![Code-First](https://img.shields.io/badge/code--first-n8nac-blue.svg)
 ![Status](https://img.shields.io/badge/status-live--verified-brightgreen.svg)
 
-**A code-first n8n workflow set that detects failures, diagnoses them, attempts recovery, and gets cheaper over time.** The project includes a caller workflow, a self-healer, a simulator for known failure classes, and a monitoring workflow that watches recent healing outcomes.
+**The 4th time this workflow sees the same error, it heals itself with zero LLM tokens.** A self-healing system that learns from failures — first occurrence uses AI diagnosis, but once a pattern has healed 3 times, future matches skip the LLM entirely and route from memory.
 
 ## Why This Is Different
 
@@ -31,6 +31,14 @@ Measured on the live workflows on 2026-04-16:
 | Learned retry case | `379 ms`, `0` tokens, `0` LLM calls |
 | Scenario sweep mix | `4/6` live simulator scenarios already route through `historical` |
 | Projection at 70% repeat rate | `70` fewer LLM calls, `25,130` fewer tokens, `$0.0660` lower cost per `100` errors |
+
+### Cost at Scale
+
+| Scale | v1 (every error = LLM) | v2 (70% learned) | Monthly Savings |
+|---|---|---|---|
+| 100 errors/month | $0.094 | $0.028 | $0.066 |
+| 1,000 errors/month | $0.94 | $0.28 | $0.66 |
+| 10,000 errors/month | $9.43 | $2.83 | $6.60 |
 
 This is the core value proposition: **the workflow does not just auto-heal, it compounds what it learns and reduces future diagnosis cost.**
 
@@ -79,19 +87,6 @@ That is the behavior to sell: the system stops paying for diagnosis once it has 
 | `Error Generator` | `rWAEEC4nCqojdRtu` | `POST /webhook/simulate-error` | Safe simulator for known failure classes |
 | `Self-Healing Monitor` | `nrpTCtxXa9OxzbZG` | `POST /webhook/self-healing-monitor` | Threshold-based monitoring and alerting |
 
-## Runtime Model
-
-This n8n instance blocks `$env` access inside node expressions. Because of that, the public webhook entrypoints accept runtime values directly in the payload:
-
-- `openrouter_api_key`
-- `openrouter_model`
-- `slack_webhook_url`
-- `n8n_api_key`
-- `execution_id`
-- `self_healer_webhook_url`
-
-`n8n_api_key` is required when the caller wants execution inspection or when the monitor queries the n8n executions API. `execution_id` is optional for direct healer calls, but `API Data Sync` now forwards its own execution ID automatically when `n8n_api_key` is supplied.
-
 ## Recovery Paths
 
 | Path | Trigger | Behavior |
@@ -118,106 +113,25 @@ If you want the full OpenRouter path and token accounting in production or durin
 
 ## Usage Examples
 
-### Successful Sync
+**Trigger a self-healing failure:**
 
 ```bash
 curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
   -H "Content-Type: application/json" \
-  -d '{
-    "max_items": 5
-  }'
+  -d '{"force_write_error": true, "n8n_api_key": "'"$N8N_API_KEY"'"}'
 ```
 
-Expected result:
-
-- records are transformed
-- the latest snapshot is written to workflow static data
-- the response reports `status=success`
-
-### Force A Healed Failure Through API Data Sync
-
-```bash
-curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
-  -H "Content-Type: application/json" \
-  -d '{
-    "force_write_error": true,
-    "n8n_api_key": "'"$N8N_API_KEY"'"
-  }'
-```
-
-Expected healed response fields include:
-
-- `execution_id`
-- `execution_context.failed_node`
-- `execution_context.failed_node_input`
-
-### Simulate A Known Failure Class
+**Simulate a specific error class:**
 
 ```bash
 curl -X POST http://172.31.224.1:5678/webhook/simulate-error \
   -H "Content-Type: application/json" \
-  -d '{
-    "error_type": "401",
-    "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
-    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
-  }'
+  -d '{"error_type": "429", "openrouter_api_key": "'"$OPENROUTER_API_KEY"'"}'
 ```
 
-Supported simulator `error_type` values:
+Run all six scenarios at once: `npm run demo:errors`
 
-- `429`
-- `500`
-- `401`
-- `parse`
-- `timeout`
-- `schema`
-
-To run all six scenarios in sequence:
-
-```bash
-export N8N_BASE_URL="http://172.31.224.1:5678"
-npm run demo:errors
-```
-
-### Call The Healer Directly
-
-```bash
-curl -X POST http://172.31.224.1:5678/webhook/self-healer \
-  -H "Content-Type: application/json" \
-  -d '{
-    "error_type": "401",
-    "error_message": "Authentication failed",
-    "node_name": "Fetch Source Posts",
-    "workflow_name": "API Data Sync",
-    "input_data": {"source_url": "https://jsonplaceholder.typicode.com/posts"},
-    "retry_target_url": "",
-    "retry_method": "GET",
-    "execution_id": "1234",
-    "n8n_api_key": "'"$N8N_API_KEY"'",
-    "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
-    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
-  }'
-```
-
-### Call The Monitor Directly
-
-```bash
-curl -X POST http://172.31.224.1:5678/webhook/self-healing-monitor \
-  -H "Content-Type: application/json" \
-  -d '{
-    "n8n_api_key": "'"$N8N_API_KEY"'",
-    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'",
-    "expect_openrouter": false
-  }'
-```
-
-The monitor response includes:
-
-- `status`
-- `severity`
-- `reasons`
-- `counts`
-- `alert_delivery_status`
+See the full API for the healer, monitor, and direct-call examples in [docs/runbook.md](docs/runbook.md).
 
 ## Architecture
 
@@ -303,6 +217,19 @@ npx --yes n8nac push workflows/agents/self-healer/workflow/workflow.ts --verify
 npx --yes n8nac push workflows/utilities/error-simulator/workflow/workflow.ts --verify
 npx --yes n8nac push workflows/utilities/monitor/workflow/workflow.ts --verify
 ```
+
+## Runtime Model
+
+This n8n instance blocks `$env` access inside node expressions. Because of that, the public webhook entrypoints accept runtime values directly in the payload:
+
+- `openrouter_api_key`
+- `openrouter_model`
+- `slack_webhook_url`
+- `n8n_api_key`
+- `execution_id`
+- `self_healer_webhook_url`
+
+`n8n_api_key` is required when the caller wants execution inspection or when the monitor queries the n8n executions API. `execution_id` is optional for direct healer calls, but `API Data Sync` now forwards its own execution ID automatically when `n8n_api_key` is supplied.
 
 ## Error Handling
 
