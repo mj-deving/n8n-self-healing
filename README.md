@@ -4,6 +4,8 @@ Production-shaped n8n workflow set for detecting failures, diagnosing them throu
 
 Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
 
+Operators maintaining the live workflows should use [docs/runbook.md](docs/runbook.md) for the verification sequence, failure classification, and common troubleshooting steps.
+
 ## What The Project Does
 
 - `API Data Sync` fetches remote data, transforms it, stores the latest output snapshot in workflow static data, and forwards failures to the self-healer.
