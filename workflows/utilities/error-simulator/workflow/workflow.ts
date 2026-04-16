@@ -1,8 +1,9 @@
 import { workflow, node, links } from '@n8n-as-code/transformer';
 
 @workflow({
+    id: 'rWAEEC4nCqojdRtu',
     name: 'Error Generator',
-    active: false,
+    active: true,
     settings: {
         executionOrder: 'v1',
         callerPolicy: 'workflowsFromSameOwner',
@@ -43,7 +44,11 @@ export class ErrorGeneratorWorkflow {
 return {
   json: {
     error_type: String(body.error_type || '429'),
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    openrouter_api_key: String(body.openrouter_api_key || ''),
+    openrouter_model: String(body.openrouter_model || ''),
+    slack_webhook_url: String(body.slack_webhook_url || ''),
+    self_healer_webhook_url: String(body.self_healer_webhook_url || 'http://172.31.224.1:5678/webhook/self-healer')
   }
 };`,
     };
@@ -161,7 +166,8 @@ return { json: payload };`,
     BuildErrorContext = {
         mode: 'runOnceForEachItem',
         language: 'javaScript',
-        jsCode: `const scenario = $('Normalize Scenario').item.json.error_type;
+        jsCode: `const request = $('Normalize Scenario').item.json;
+const scenario = request.error_type;
 const defaults = {
   '429': {
     node_name: 'Simulate 429',
@@ -214,7 +220,11 @@ return {
     retry_target_url: selected.retry_target_url,
     retry_method: selected.retry_method,
     fallback_payload: scenario === 'schema' ? [{ adapted: true, source: 'schema-fallback' }] : [],
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    openrouter_api_key: request.openrouter_api_key || '',
+    openrouter_model: request.openrouter_model || '',
+    slack_webhook_url: request.slack_webhook_url || '',
+    self_healer_webhook_url: request.self_healer_webhook_url || ''
   }
 };`,
     };
@@ -229,7 +239,7 @@ return {
     })
     InvokeSelfHealer = {
         method: 'POST',
-        url: 'http://172.31.224.1:5678/webhook/self-healer',
+        url: '={{ $json.self_healer_webhook_url || "http://172.31.224.1:5678/webhook/self-healer" }}',
         authentication: 'none',
         sendBody: true,
         contentType: 'raw',

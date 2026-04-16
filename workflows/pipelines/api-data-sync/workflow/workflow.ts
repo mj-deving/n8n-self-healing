@@ -21,8 +21,9 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // </workflow-map>
 
 @workflow({
+    id: 'jBbMvA2RK39YlEM9',
     name: 'API Data Sync',
-    active: false,
+    active: true,
     settings: {
         executionOrder: 'v1',
         callerPolicy: 'workflowsFromSameOwner',
@@ -82,6 +83,10 @@ const sourceUrl = body.source_url || 'https://jsonplaceholder.typicode.com/posts
 const storageKey = body.storage_key || 'api-data-sync:last-output';
 const maxItems = Number(body.max_items || 10);
 const forceWriteError = Boolean(body.force_write_error || false);
+const openrouterApiKey = String(body.openrouter_api_key || '');
+const openrouterModel = String(body.openrouter_model || '');
+const slackWebhookUrl = String(body.slack_webhook_url || '');
+const selfHealerWebhookUrl = String(body.self_healer_webhook_url || 'http://172.31.224.1:5678/webhook/self-healer');
 
 return {
   json: {
@@ -90,7 +95,11 @@ return {
     storageKey,
     maxItems,
     forceWriteError,
-    workflowName: 'API Data Sync'
+    workflowName: 'API Data Sync',
+    openrouter_api_key: openrouterApiKey,
+    openrouter_model: openrouterModel,
+    slack_webhook_url: slackWebhookUrl,
+    self_healer_webhook_url: selfHealerWebhookUrl
   }
 };`,
     };
@@ -250,7 +259,11 @@ return {
     input_data: request,
     retry_target_url: request.sourceUrl,
     retry_method: 'GET',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    openrouter_api_key: request.openrouter_api_key || '',
+    openrouter_model: request.openrouter_model || '',
+    slack_webhook_url: request.slack_webhook_url || '',
+    self_healer_webhook_url: request.self_healer_webhook_url || ''
   }
 };`,
     };
@@ -279,7 +292,11 @@ return {
     workflow_name: request.workflowName,
     input_data: request,
     fallback_payload: [],
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    openrouter_api_key: request.openrouter_api_key || '',
+    openrouter_model: request.openrouter_model || '',
+    slack_webhook_url: request.slack_webhook_url || '',
+    self_healer_webhook_url: request.self_healer_webhook_url || ''
   }
 };`,
     };
@@ -310,7 +327,11 @@ return {
     fallback_payload: transformed.transformed,
     retry_target_url: transformed.sourceUrl,
     retry_method: 'GET',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    openrouter_api_key: transformed.openrouter_api_key || '',
+    openrouter_model: transformed.openrouter_model || '',
+    slack_webhook_url: transformed.slack_webhook_url || '',
+    self_healer_webhook_url: transformed.self_healer_webhook_url || ''
   }
 };`,
     };
@@ -325,7 +346,7 @@ return {
     })
     InvokeSelfHealer = {
         method: 'POST',
-        url: 'http://172.31.224.1:5678/webhook/self-healer',
+        url: '={{ $json.self_healer_webhook_url || "http://172.31.224.1:5678/webhook/self-healer" }}',
         authentication: 'none',
         sendBody: true,
         contentType: 'raw',

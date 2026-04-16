@@ -6,8 +6,9 @@ import { workflow, node, links } from '@n8n-as-code/transformer';
 // </workflow-map>
 
 @workflow({
+    id: '85XCB5Us5UVyu3Da',
     name: 'Self-Healer',
-    active: false,
+    active: true,
     settings: {
         executionOrder: 'v1',
         callerPolicy: 'workflowsFromSameOwner',

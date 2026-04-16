@@ -9,9 +9,23 @@ echo "| error_type | result |"
 echo "|---|---|"
 
 for error_type in "${ERROR_TYPES[@]}"; do
+    payload="$(jq -nc \
+        --arg error_type "$error_type" \
+        --arg openrouter_api_key "${OPENROUTER_API_KEY:-}" \
+        --arg openrouter_model "${OPENROUTER_MODEL:-}" \
+        --arg slack_webhook_url "${SLACK_WEBHOOK_URL:-}" \
+        --arg self_healer_webhook_url "${SELF_HEALER_WEBHOOK_URL:-}" \
+        '{
+          error_type: $error_type,
+          openrouter_api_key: $openrouter_api_key,
+          openrouter_model: $openrouter_model,
+          slack_webhook_url: $slack_webhook_url,
+          self_healer_webhook_url: $self_healer_webhook_url
+        }')"
+
     response="$(curl -sS -X POST "$WEBHOOK_URL" \
         -H "Content-Type: application/json" \
-        -d "{\"error_type\":\"${error_type}\"}" || true)"
+        -d "$payload" || true)"
 
     if [ -z "$response" ]; then
         response="request failed"

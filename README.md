@@ -1,138 +1,87 @@
 # Self-Healing n8n Workflow
 
-Code-first n8n project that demonstrates a self-healing workflow pattern:
+Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
 
-- `API Data Sync` pulls API data, transforms it, stores the latest output snapshot in workflow static data, and forwards recoverable failures to a healer workflow.
-- `Self-Healer` diagnoses failures through OpenRouter when credentials are present, falls back to deterministic heuristics when they are not, retries or backs off where possible, records a structured heal log in workflow static data, and emits Slack-style notifications through a webhook URL.
-- `Error Generator` simulates six failure classes and routes each of them into the same healer workflow.
+The repository now matches the live verified project state instead of the earlier scaffold state:
 
-## Architecture
+- `API Data Sync` workflow ID: `jBbMvA2RK39YlEM9`
+- `Self-Healer` workflow ID: `85XCB5Us5UVyu3Da`
+- `Error Generator` workflow ID: `rWAEEC4nCqojdRtu`
+- verified against `http://172.31.224.1:5678` on April 16, 2026
+- execution `1871` confirmed `diagnosis_source=openrouter`, `fix_strategy=escalate`, and Slack returned `{"data":"ok"}`
 
-```mermaid
-graph TD
-    A["Schedule Trigger / POST /webhook/api-data-sync"] --> B["Fetch JSONPlaceholder posts"]
-    B --> C["Transform records"]
-    C --> D["Store latest output snapshot"]
-    D --> E["Success response"]
+## What The Project Does
 
-    B -. error .-> F["Build error context"]
-    C -. error .-> F
-    D -. error .-> F
-    F --> G["POST /webhook/self-healer"]
+- `API Data Sync` fetches remote data, transforms it, stores the latest output snapshot in workflow static data, and forwards failures to the self-healer.
+- `Self-Healer` accepts structured error payloads, chooses between OpenRouter diagnosis and deterministic fallback logic, retries/backoffs/falls back/escalates, writes a heal log to workflow static data, and posts Slack-style alerts.
+- `Error Generator` gives you a safe way to trigger known failure classes and verify the healing loop end to end.
 
-    H["POST /webhook/simulate-error"] --> I["Simulate 429 / 500 / 401 / parse / timeout / schema"]
-    I -. error .-> J["Build simulator error context"]
-    J --> G
+## Runtime Model
 
-    G --> K["Prepare error context"]
-    K --> L{"OpenRouter API key set?"}
-    L -->|yes| M["Model diagnosis via OpenRouter"]
-    L -->|no| N["Mock diagnosis fallback"]
-    M --> O{"Strategy"}
-    N --> O
-    O -->|retry| P["Retry request"]
-    O -->|backoff| Q["Wait"] --> R["Retry request"]
-    O -->|fallback| S["Fallback logic"]
-    O -->|escalate| T["Escalation webhook"]
-    P --> U["Append heal event"]
-    R --> U
-    S --> U
-    T --> U
-    U --> V{"Healed?"}
-    V -->|yes| W["Green Slack webhook"]
-    V -->|no| X["Return escalation result"]
-```
+This n8n instance blocks `$env` access inside node expressions. Because of that, runtime secrets and override values are payload-driven.
+
+The public webhook entrypoints accept and forward these fields:
+
+- `openrouter_api_key`
+- `openrouter_model` (optional override)
+- `slack_webhook_url`
+- `self_healer_webhook_url` (optional override for callers; defaults to the local healer webhook)
+
+That means you can test the complete flow through `api-data-sync` or `simulate-error` without baking secrets into the workflow definition.
 
 ## Repository Layout
 
-- `workflow/` root-level single-workflow export placeholder for distribution
-- `template/` scaffold source used by `npm run new-workflow`
 - `workflows/pipelines/api-data-sync/` primary workflow package
-- `workflows/agents/self-healer/` healer sub-workflow package
+- `workflows/agents/self-healer/` healer workflow package
 - `workflows/utilities/error-simulator/` simulator workflow package
-- `data/output.json` example payload artifact for local documentation
-- `data/heal-log.json` example audit artifact for local documentation
-- `docs/` lightweight project site and decision record placeholders
-- `assets/` screenshots and diagrams for documentation
+- `template/` scaffold source used by `npm run new-workflow`
+- `workflow/` single-workflow export placeholder retained for distribution tooling
+- `scripts/init-n8n.sh` non-interactive `n8nac` bootstrap helper
+- `scripts/validate-workflows.sh` credential-free local validation lane
+- `scripts/demo-all-errors.sh` quick simulator driver
+- `data/output.json` and `data/heal-log.json` example seed artifacts for local docs
 
-## Bootstrap Order
-
-Use this order for a fresh repo created from this scaffold:
-
-1. Install dependencies and enable the repo hooks:
+## Bootstrap
 
 ```bash
 npm install
 git config core.hooksPath .githooks
-```
-
-2. Initialize Beads if this copy does not already have `.beads/`, then recover tracker context:
-
-```bash
-bd init
 bd prime
-```
 
-If the repo is already initialized, skip `bd init` and run `bd prime`.
-
-3. Save your n8n API key and initialize `n8nac` non-interactively:
-
-```bash
 export N8N_API_KEY="<your n8n API key>"
 npm run setup:n8n -- http://172.31.224.1:5678
-```
 
-The init wrapper also accepts `[sync-folder] [instance-name]` after the host when a project needs a non-default target path.
-
-4. Run the credential-free validation lane before any live push:
-
-```bash
 npm run validate:workflows
 npm run validate
 ```
 
-5. Configure runtime environment for live healing:
-
-```bash
-export OPENROUTER_API_KEY="<openrouter key>"
-export SLACK_WEBHOOK_URL="https://hooks.slack.com/services/..."
-export N8N_BASE_URL="http://172.31.224.1:5678"
-```
-
-This n8n instance blocks `$env` access inside node expressions, so the current self-healer expects `openrouter_api_key` and `slack_webhook_url` in the incoming payload or sub-workflow inputs at runtime.
-
-Optional environment variables:
-
-- `SELF_HEALER_WEBHOOK_URL` to override the healer webhook target used by other workflows
-
-6. Push and verify each workflow only after bootstrap and local validation are complete.
-
-## Push to n8n
-
-Push from each workflow directory because `workflow.ts` is the source of truth:
-
-```bash
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/agents/self-healer/workflow/workflow.ts
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/pipelines/api-data-sync/workflow/workflow.ts
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/utilities/error-simulator/workflow/workflow.ts
-```
-
-After push, verify each workflow with the returned ID:
-
-```bash
-npx --yes n8nac verify <workflow-id>
-```
-
-Local validation is available without n8n credentials:
+## Local Quality Gates
 
 ```bash
 npm run validate:workflows
 npm run validate
+npm run check-secrets
 ```
 
-## Demo
+## Push To n8n
 
-### Happy path
+`workflow.ts` is the source of truth for every workflow package.
+
+```bash
+npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/agents/self-healer/workflow/workflow.ts --verify
+npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
+npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/utilities/error-simulator/workflow/workflow.ts --verify
+```
+
+## Webhook Endpoints
+
+- `POST /webhook/api-data-sync`
+- `POST /webhook/self-healer`
+- `POST /webhook/simulate-error`
+
+## Example Requests
+
+### Successful Sync
 
 ```bash
 curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
@@ -142,18 +91,36 @@ curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
   }'
 ```
 
-Expected outcome:
+Expected result:
 
-- records are transformed to uppercase titles with truncated bodies
-- the latest transformed payload is stored in workflow static data under `api-data-sync:last-output`
-- webhook response reports `status=success`
+- records are transformed
+- the latest snapshot is written to workflow static data
+- the response reports `status=success`
 
-### Simulated failures
+### Force A Healed Failure Path Through API Data Sync
+
+```bash
+curl -X POST http://172.31.224.1:5678/webhook/api-data-sync \
+  -H "Content-Type: application/json" \
+  -d '{
+    "force_write_error": true,
+    "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
+    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
+  }'
+```
+
+That request exercises the payload-driven credential path: the sync workflow raises a write failure, forwards the runtime values into the healer request, and the healer can use OpenRouter and Slack without relying on `$env`.
+
+### Simulate A Known Failure Class
 
 ```bash
 curl -X POST http://172.31.224.1:5678/webhook/simulate-error \
   -H "Content-Type: application/json" \
-  -d '{ "error_type": "429" }'
+  -d '{
+    "error_type": "401",
+    "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
+    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
+  }'
 ```
 
 Supported `error_type` values:
@@ -165,10 +132,29 @@ Supported `error_type` values:
 - `timeout`
 - `schema`
 
-To run all six scenarios in sequence once the workflows are active:
+To run all six scenarios in sequence:
 
 ```bash
+export N8N_BASE_URL="http://172.31.224.1:5678"
 npm run demo:errors
+```
+
+### Call The Healer Directly
+
+```bash
+curl -X POST http://172.31.224.1:5678/webhook/self-healer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "error_type": "401",
+    "error_message": "Authentication failed",
+    "node_name": "Fetch Source Posts",
+    "workflow_name": "API Data Sync",
+    "input_data": {"source_url": "https://jsonplaceholder.typicode.com/posts"},
+    "retry_target_url": "",
+    "retry_method": "GET",
+    "openrouter_api_key": "'"$OPENROUTER_API_KEY"'",
+    "slack_webhook_url": "'"$SLACK_WEBHOOK_URL"'"
+  }'
 ```
 
 ## Expected Healing Strategies
@@ -182,27 +168,17 @@ npm run demo:errors
 | `timeout` | `backoff` | retries with a longer timeout target |
 | `schema` | `fallback` | adapts the malformed shape to a stable structure |
 
-## Validation Status
+## Current Status
 
-Local validation completed in this repo:
+- local validation passes with `npm run validate:workflows`
+- the committed workflow sources now include the live workflow IDs and active state
+- the public caller workflows propagate payload-supplied runtime credentials into the healer
+- Beads issue tracking is initialized and `bd prime` restores repo context
 
-- workflow source files created in code-first `workflow.ts` format
-- seed data files present and valid JSON
-- `npm run validate:workflows` runs locally without n8n credentials
+## Acceptance
 
-Live validation also completed against `http://172.31.224.1:5678` on April 16, 2026:
-
-- `Self-Healer` production webhook test succeeded with runtime payload credentials
-- execution `1871` confirmed `diagnosis_source=openrouter` and `fix_strategy=escalate`
-- `Send Escalation Alert` succeeded and Slack returned `{"data":"ok"}`
-- the active runtime constraint is unchanged: this n8n instance blocks `$env` access in node expressions, so `openrouter_api_key` and `slack_webhook_url` must be passed in the payload or sub-workflow inputs
-
-## Acceptance Checklist
-
-- [x] Primary workflow scaffolded with API fetch, transform, static-data persistence, and healer invocation
-- [x] Error simulator scaffolded with 6 failure modes
-- [x] Healer workflow scaffolded with AI diagnosis, retry/backoff/fallback/escalate routing, logging, and notifications
-- [x] `data/output.json` and `data/heal-log.json` seeded
-- [x] Project README includes architecture, setup, and demo guidance
-- [x] Workflows pushed to n8n and verified
-- [x] Live end-to-end tests executed against n8n with OpenRouter and Slack credentials
+- [x] Primary workflow implemented and verified in n8n
+- [x] Self-healer implemented with OpenRouter diagnosis and deterministic fallback
+- [x] Error simulator implemented with six failure classes
+- [x] Runtime credential flow is payload-driven end to end
+- [x] README reflects the live verified project state
