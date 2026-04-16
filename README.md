@@ -2,9 +2,12 @@
 
 Production-shaped n8n workflow set for detecting failures, diagnosing them through OpenRouter, applying a recovery strategy, and emitting Slack escalation or healed notifications.
 
-Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md). Production-polish monitoring guidance lives in [docs/monitoring.md](docs/monitoring.md).
+Status: WF17 is implemented, pushed, and live-verified. Tracked workflow IDs, live checks, and dated verification evidence live in [docs/verification.md](docs/verification.md).
 
-Operators maintaining the live workflows should use [docs/runbook.md](docs/runbook.md) for the verification sequence, failure classification, and common troubleshooting steps.
+For ongoing maintenance:
+
+- use [docs/runbook.md](docs/runbook.md) for the verification sequence, failure classification, and troubleshooting flow
+- use [docs/monitoring.md](docs/monitoring.md) for production-polish monitoring and alert-tuning guidance
 
 ## What The Project Does
 
@@ -47,6 +50,7 @@ bd prime
 export N8N_API_KEY="<your n8n API key>"
 npm run setup:n8n -- http://172.31.224.1:5678
 
+npm test
 npm run validate:workflows
 npm run validate
 ```
@@ -54,6 +58,7 @@ npm run validate
 ## Local Quality Gates
 
 ```bash
+npm test
 npm run validate:workflows
 npm run validate
 npm run check-secrets
@@ -64,9 +69,9 @@ npm run check-secrets
 `workflow.ts` is the source of truth for every workflow package.
 
 ```bash
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/agents/self-healer/workflow/workflow.ts --verify
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
-npx --yes n8nac push /home/mj/projects/n8n-self-healing/workflows/utilities/error-simulator/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/agents/self-healer/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/pipelines/api-data-sync/workflow/workflow.ts --verify
+npx --yes n8nac push workflows/utilities/error-simulator/workflow/workflow.ts --verify
 ```
 
 ## Webhook Endpoints
@@ -166,6 +171,7 @@ curl -X POST http://172.31.224.1:5678/webhook/self-healer \
 
 ## Current Status
 
+- local contract tests pass with `npm test`
 - local validation passes with `npm run validate:workflows`
 - all 3 workflow sources are pushed and verified in n8n
 - happy-path sync and all 6 simulator scenarios have been rechecked live
