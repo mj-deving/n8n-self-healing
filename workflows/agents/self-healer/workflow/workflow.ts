@@ -113,8 +113,10 @@ return {
         jsCode: `const ctx = $json;
 const staticData = $getWorkflowStaticData('global');
 const healLog = Array.isArray(staticData.healLog) ? staticData.healLog : [];
-const historicalMatches = healLog
-  .filter((entry) => entry && entry.error_type === ctx.error_type && entry.outcome === 'healed')
+const relevantHistory = healLog
+  .filter((entry) => entry && entry.error_type === ctx.error_type);
+const historicalMatches = relevantHistory
+  .filter((entry) => entry.outcome === 'healed')
   .slice(-5);
 
 const strategyCounts = historicalMatches.reduce((acc, entry) => {
@@ -132,6 +134,8 @@ if (dominantStrategy && dominantStrategy[1] >= 3) {
   const historicalEntry = [...historicalMatches]
     .reverse()
     .find((entry) => (entry.fix_strategy || entry.strategy || entry.repaired_with) === dominantStrategy[0]) || historicalMatches[historicalMatches.length - 1];
+  const dominantSuccessRate = historicalEntry?.success_rate?.by_strategy?.[dominantStrategy[0]];
+  const formattedSuccessRate = dominantSuccessRate?.formatted || (dominantStrategy[1] + '/' + historicalMatches.length);
 
   return {
     json: {
@@ -140,7 +144,7 @@ if (dominantStrategy && dominantStrategy[1] >= 3) {
       diagnosis: historicalEntry?.ai_diagnosis || ('Previously healed ' + dominantStrategy[1] + ' times with ' + dominantStrategy[0] + '.'),
       fix_strategy: dominantStrategy[0],
       wait_seconds: Number(historicalEntry?.total_heal_time_ms || 0) / 1000,
-      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ': ' + dominantStrategy[1] + '/' + historicalMatches.length
+      details: 'Skipped LLM - historical success rate for ' + ctx.error_type + ' via ' + dominantStrategy[0] + ': ' + formattedSuccessRate
     }
   };
 }
@@ -502,8 +506,62 @@ const entry = {
 };
 
 const existing = Array.isArray(staticData.healLog) ? staticData.healLog : [];
-existing.push(entry);
-staticData.healLog = existing.slice(-100);
+const nextLog = existing.concat(entry).slice(-100);
+const entriesForErrorType = nextLog.filter((item) => item && item.error_type === entry.error_type);
+
+const summary = entriesForErrorType.reduce((acc, item) => {
+  const strategy = item.fix_strategy || item.strategy || item.repaired_with || 'unknown';
+  const bucket = acc.by_strategy[strategy] || { total: 0, healed: 0, escalated: 0 };
+
+  bucket.total += 1;
+  if (item.outcome === 'healed') {
+    bucket.healed += 1;
+    acc.healed += 1;
+  } else {
+    bucket.escalated += 1;
+    acc.escalated += 1;
+  }
+
+  acc.total += 1;
+  acc.by_strategy[strategy] = bucket;
+  return acc;
+}, { total: 0, healed: 0, escalated: 0, by_strategy: {} });
+
+const withRates = Object.fromEntries(
+  Object.entries(summary.by_strategy).map(([strategy, counts]) => {
+    const ratio = counts.total ? counts.healed / counts.total : 0;
+    return [
+      strategy,
+      {
+        ...counts,
+        ratio,
+        percent: Math.round(ratio * 100),
+        formatted: counts.healed + '/' + counts.total,
+      }
+    ];
+  })
+);
+
+const overallRatio = summary.total ? summary.healed / summary.total : 0;
+entry.success_rate = {
+  error_type: entry.error_type,
+  overall: {
+    total: summary.total,
+    healed: summary.healed,
+    escalated: summary.escalated,
+    ratio: overallRatio,
+    percent: Math.round(overallRatio * 100),
+    formatted: summary.healed + '/' + summary.total,
+  },
+  by_strategy: withRates,
+};
+
+nextLog[nextLog.length - 1] = entry;
+staticData.healLog = nextLog;
+staticData.healStatsByErrorType = {
+  ...(staticData.healStatsByErrorType || {}),
+  [entry.error_type]: entry.success_rate,
+};
 staticData.lastHealEntry = entry;
 
 return {
@@ -518,7 +576,9 @@ return {
     error_type: $json.error_type,
     error_message: $json.error_message,
     retry_count: Number($json.retry_count || 0),
+    diagnosis_source: $json.diagnosis_source,
     slack_webhook_url: $json.slack_webhook_url || '',
+    success_rate: entry.success_rate,
     log_entry: entry,
     storage_backend: 'workflow_static_data'
   }
