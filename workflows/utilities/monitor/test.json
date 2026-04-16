@@ -1,0 +1,14 @@
+[
+  {
+    "description": "Prime monitor config and run aggregation via webhook",
+    "input": {
+      "n8n_api_key": "SET_FROM_ENV",
+      "slack_webhook_url": "https://example.invalid/slack-webhook-missing",
+      "expect_openrouter": false
+    },
+    "expected": {
+      "status": "ok|alert",
+      "severity": "none|warning|high"
+    }
+  }
+]
