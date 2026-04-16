@@ -9,6 +9,26 @@ function read(relativePath) {
   return fs.readFileSync(path.join(repoRoot, relativePath), 'utf8');
 }
 
+test('self-healer collapses diagnosis into one code node with historical and OpenRouter paths', () => {
+  const source = read('workflows/agents/self-healer/workflow/workflow.ts');
+
+  assert.match(source, /name: 'Diagnose Error'/);
+  assert.match(source, /\$getWorkflowStaticData\('global'\)/);
+  assert.match(source, /const historicalMatches = healLog/);
+  assert.match(source, /\$helpers\.httpRequest\(\{/);
+  assert.match(source, /diagnosis_source: 'historical'/);
+  assert.match(source, /diagnosis_source: 'openrouter'/);
+  assert.match(source, /diagnosis_source: 'deterministic'/);
+  assert.match(source, /this\.NormalizeErrorInput\.out\(0\)\.to\(this\.DiagnoseError\.in\(0\)\);/);
+  assert.match(source, /this\.DiagnoseError\.out\(0\)\.to\(this\.RouteFixStrategy\.in\(0\)\);/);
+
+  assert.doesNotMatch(source, /name: 'Prepare Model Request'/);
+  assert.doesNotMatch(source, /name: 'Route Diagnosis Mode'/);
+  assert.doesNotMatch(source, /name: 'OpenRouter Diagnosis'/);
+  assert.doesNotMatch(source, /name: 'Extract Model Diagnosis'/);
+  assert.doesNotMatch(source, /name: 'Mock Diagnosis'/);
+});
+
 test('self-healer preserves slack webhook context into healed alerts', () => {
   const source = read('workflows/agents/self-healer/workflow/workflow.ts');
 
