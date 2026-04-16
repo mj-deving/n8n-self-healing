@@ -78,6 +78,25 @@ test('error simulator falls back cleanly for unknown scenarios', () => {
   assert.match(source, /self_healer_webhook_url:\s*request\.self_healer_webhook_url \|\| ''/);
 });
 
+test('monitor workflow polls self-healer executions and routes alert severity', () => {
+  const source = read('workflows/utilities/monitor/workflow/workflow.ts');
+
+  assert.match(source, /name: 'Self-Healing Monitor'/);
+  assert.match(source, /name: 'Schedule Trigger'/);
+  assert.match(source, /minutesInterval: 15/);
+  assert.match(source, /name: 'Monitor Webhook'/);
+  assert.match(source, /path: 'self-healing-monitor'/);
+  assert.match(source, /name: 'Query Self-Healer Executions'/);
+  assert.match(source, /api\/v1\/executions/);
+  assert.match(source, /includeData', value: 'true'/);
+  assert.match(source, /3 or more escalations within 30 minutes/);
+  assert.match(source, /5 or more healed failures within 30 minutes/);
+  assert.match(source, /Fallback is the dominant strategy in the last hour/);
+  assert.match(source, /name: 'Route Alert Severity'/);
+  assert.match(source, /this\.RouteAlertSeverity\.out\(1\)\.to\(this\.BuildAlertPayload\.in\(0\)\);/);
+  assert.match(source, /this\.RouteAlertSeverity\.out\(2\)\.to\(this\.BuildAlertPayload\.in\(0\)\);/);
+});
+
 test('demo script covers all six supported simulator scenarios', () => {
   const source = read('scripts/demo-all-errors.sh');
 
