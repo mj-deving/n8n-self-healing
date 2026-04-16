@@ -5,10 +5,11 @@
 - **Read `@AGENTS.md`** for session protocol (Beads task tracking, Landing the Plane, session completion rules)
 - **Read `AGENTS.md`** for the n8nac workflow protocol (GitOps sync, research, validation, testing, error classification)
   - If `AGENTS.md` says "run n8nac init", do that first — it auto-generates the full protocol
+- **Run `bd prime`** at session start to recover current issue-tracker context
 
 ## Project Overview
 
-Self-healing n8n workflow that detects failures, uses Claude AI to diagnose the root cause, applies a fix strategy, retries, and logs the outcome. Demonstrates the "Self-Healing" pattern from the Agentic Workflows paradigm.
+Self-healing n8n workflow that detects failures, uses an OpenRouter-backed model call to diagnose the root cause, applies a fix strategy, retries, and logs the outcome. Demonstrates the "Self-Healing" pattern from the Agentic Workflows paradigm.
 
 **Architecture:**
 ```
@@ -16,10 +17,10 @@ Primary Workflow (API Data Sync)
   → on error → Error Handler
     → Healer Sub-Workflow
       1. Capture error context (node, message, input data)
-      2. AI Diagnosis (Claude via HTTP Request)
+      2. AI Diagnosis (OpenRouter via HTTP Request)
       3. Select fix strategy (backoff, retry, fallback, escalate)
       4. Apply fix + retry original operation
-      5. Log outcome to data/heal-log.json
+      5. Log outcome to workflow static data
       6. Notify via Slack (healed=green, escalated=red)
 ```
 
@@ -27,24 +28,32 @@ Primary Workflow (API Data Sync)
 
 ## Tech Stack
 
-- **n8n 2.x** — workflow automation (connect via `npx --yes n8nac init`)
+- **n8n 2.x** — workflow automation (connect via `npm run setup:n8n -- <host>`)
 - **n8nac** — code-first workflow development (`.workflow.ts` format)
-- **Claude** — AI-powered error diagnosis via HTTP Request node (Anthropic API)
+- **OpenRouter** — AI-powered error diagnosis via HTTP Request node
 - **Slack** — notifications (healed / escalated)
 - **Beads** (`bd`) — AI-native issue tracker
 
 ## n8n Instance
 
 - **URL**: `http://172.31.224.1:5678` (WSL bridge)
-- Run `npx --yes n8nac init` to connect
+- Use `npm run setup:n8n -- http://172.31.224.1:5678` after exporting `N8N_API_KEY`
 
 ## Key Commands
 
 ```bash
+# First-time repo bootstrap
+npm install
+git config core.hooksPath .githooks
+bd prime
+export N8N_API_KEY="<your n8n API key>"
+npm run setup:n8n -- http://172.31.224.1:5678
+npm run validate:workflows
+
 # n8nac operations
-npx --yes n8nac init                    # First-time setup — connect to n8n
+npm run setup:n8n -- <host>             # First-time setup — connect to n8n
 npx --yes n8nac list                    # List all workflows
-npx --yes n8nac push <file>.workflow.ts # Push workflow to n8n
+npx --yes n8nac push <full-path>.workflow.ts # Push workflow to n8n
 npx --yes n8nac verify <id>            # Validate live workflow
 npx --yes n8nac test <id> --prod       # Test webhook workflows
 
@@ -52,8 +61,9 @@ npx --yes n8nac test <id> --prod       # Test webhook workflows
 npm run new-workflow -- <category>/<slug> "Display Name"
 
 # Beads
+bd prime              # Recover tracker context
 bd ready              # Start session — find available work
-bd sync               # End session — persist state for next agent
+bd dolt push          # Persist tracker state when network access is available
 ```
 
 ## Workflow Files
@@ -63,7 +73,7 @@ bd sync               # End session — persist state for next agent
 | `workflows/agents/self-healer/` | Healer sub-workflow (AI diagnosis + fix) |
 | `workflows/utilities/error-simulator/` | Intentional error generator for testing |
 | `workflows/pipelines/api-data-sync/` | Primary workflow that can fail |
-| `data/heal-log.json` | Healing attempt log (append-only) |
+| Workflow static data | Latest output snapshot, fallback history, and heal log |
 
 ## Error Types to Handle
 
@@ -75,11 +85,11 @@ bd sync               # End session — persist state for next agent
 | JSON Parse Error | "Malformed response" | Fallback parser + log raw |
 | Timeout | "Request too slow" | Increase timeout + retry |
 | Schema Change | "Response structure changed" | AI-generated adapter |
-| Output Write Fail | "Destination unavailable" | Queue locally + retry later |
+| Output Write Fail | "Destination unavailable" | Store fallback payload in static data + retry later |
 
 ## Critical Rules
 
-- **Push filename only**: `npx --yes n8nac push workflow.ts` — no paths
-- **Init required**: Must run `npx --yes n8nac init` before pull/push
-- **Session end**: Always run `bd sync` then `git push` — Landing the Plane protocol
+- **Push full path**: `npx --yes n8nac push /absolute/or/workspace-relative/path/to/workflow.ts`
+- **Init required**: Must export `N8N_API_KEY` and run `npm run setup:n8n -- <host>` before pull/push
+- **Session end**: Follow the Beads close protocol and use `bd dolt push` when remote access is available
 - **Never leave unpushed work** — work isn't done until `git push` succeeds
