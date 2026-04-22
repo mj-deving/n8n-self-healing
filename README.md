@@ -1,8 +1,6 @@
 # Self-Healing n8n Workflow
 
-![n8n](https://img.shields.io/badge/n8n-2.x-orange.svg)
-![Code-First](https://img.shields.io/badge/code--first-n8nac-blue.svg)
-![Status](https://img.shields.io/badge/status-live--verified-brightgreen.svg)
+![n8n](https://img.shields.io/badge/-n8n-EA4B71?style=flat-square) ![TypeScript](https://img.shields.io/badge/-TypeScript-3178C6?style=flat-square) ![Claude](https://img.shields.io/badge/-Claude-D4A574?style=flat-square)
 
 **The 4th time this workflow sees the same error, it heals itself with zero LLM tokens.** A self-healing system that learns from failures — first occurrence uses AI diagnosis, but once a pattern has healed 3 times, future matches skip the LLM entirely and route from memory.
 
